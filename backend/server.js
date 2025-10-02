@@ -7,6 +7,7 @@ import adminRoutes from './routes/admin.js';
 import attendanceRoutes from './routes/attendance.js';
 import facultyRoutes from './routes/faculty.js';
 import studentRoutes from './routes/student.js';
+import reportRoutes from './routes/report.js';
 import config from './config/config.js';
 
 // Load environment variables
@@ -40,6 +41,7 @@ app.use('/api/faculty', facultyRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/classes', studentRoutes);
+app.use('/api/report', reportRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

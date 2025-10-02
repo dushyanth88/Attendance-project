@@ -17,7 +17,7 @@ router.post('/mark', authenticate, facultyAndAbove, [
   body('class_assigned').optional().isIn(['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B']).withMessage('Invalid class'),
   body('date').optional().isISO8601().withMessage('Invalid date format'),
   body('absentRollNumbers').optional().isArray().withMessage('absentRollNumbers must be an array'),
-  body('absentees').optional().isArray().withMessage('absentees must be an array'),
+  body('absentees').optional().isArray().withMessage('absentees must be an array')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -34,13 +34,11 @@ router.post('/mark', authenticate, facultyAndAbove, [
     if (!classAssigned) {
       return res.status(400).json({ status: 'error', message: 'classId is required' });
     }
-    // Enforce today-only marking (if date provided, it must be today)
+    // Normalize the date (remove time component)
     const requestDate = req.body.date ? new Date(req.body.date) : new Date();
     requestDate.setHours(0, 0, 0, 0);
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (requestDate.getTime() !== today.getTime()) {
-      return res.status(400).json({ status: 'error', message: "Only today's attendance can be marked" });
-    }
+    
+    console.log('📅 Marking attendance for date:', requestDate.toISOString().split('T')[0]);
     const absenteesRaw = req.body.absentRollNumbers ?? req.body.absentees ?? [];
     const absentees = Array.isArray(absenteesRaw) ? absenteesRaw.map(r => String(r).trim()).filter(Boolean) : [];
 
@@ -97,7 +95,15 @@ router.post('/mark', authenticate, facultyAndAbove, [
       }
     }));
 
-    await Attendance.bulkWrite(bulkOps, { ordered: true });
+    const result = await Attendance.bulkWrite(bulkOps, { ordered: true });
+    console.log('✅ Bulk write result:', result);
+
+    // Verify records were created
+    const verificationRecords = await Attendance.find({
+      studentId: { $in: students.map(s => s.userId) },
+      date: requestDate
+    });
+    console.log(`🔍 Verification: Created ${verificationRecords.length} attendance records`);
 
     const classDoc = await ClassAttendance.create({
       classId: classAssigned,
@@ -106,7 +112,18 @@ router.post('/mark', authenticate, facultyAndAbove, [
       markedBy: currentUser._id
     });
 
-    return res.status(201).json({ status: 'success', message: 'Attendance marked successfully', attendanceId: classDoc._id });
+    return res.status(201).json({ 
+      status: 'success', 
+      message: 'Attendance marked successfully', 
+      attendanceId: classDoc._id,
+      data: {
+        class: classAssigned,
+        date: requestDate.toISOString().split('T')[0],
+        totalStudents: students.length,
+        recordsCreated: verificationRecords.length,
+        absentStudents: absentees.length
+      }
+    });
   } catch (error) {
     console.error('Mark attendance error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to mark attendance' });
@@ -357,18 +374,11 @@ router.put('/edit', authenticate, facultyAndAbove, [
     const currentUser = req.user;
     const { classId, date, absentRollNumbers } = req.body;
 
-    // Enforce today-only editing
+    // Normalize the date
     const requestDate = new Date(date);
     requestDate.setHours(0, 0, 0, 0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     
-    if (requestDate.getTime() !== today.getTime()) {
-      return res.status(403).json({ 
-        status: 'error', 
-        message: "Only today's attendance can be edited" 
-      });
-    }
+    console.log('✏️ Editing attendance for date:', requestDate.toISOString().split('T')[0]);
 
     // Authorization: Faculty can only edit attendance for their assigned class
     if (currentUser.role === 'faculty') {
@@ -417,7 +427,15 @@ router.put('/edit', authenticate, facultyAndAbove, [
       }
     }));
 
-    await Attendance.bulkWrite(bulkOps, { ordered: true });
+    const result = await Attendance.bulkWrite(bulkOps, { ordered: true });
+    console.log('✅ Edit bulk write result:', result);
+
+    // Verify records were updated
+    const verificationRecords = await Attendance.find({
+      studentId: { $in: students.map(s => s.userId) },
+      date: requestDate
+    });
+    console.log(`🔍 Verification: Found ${verificationRecords.length} updated attendance records`);
 
     // Update ClassAttendance record
     await ClassAttendance.findOneAndUpdate(
@@ -431,7 +449,14 @@ router.put('/edit', authenticate, facultyAndAbove, [
 
     return res.status(200).json({ 
       status: 'success', 
-      message: 'Attendance updated successfully' 
+      message: 'Attendance updated successfully',
+      data: {
+        class: classId,
+        date: requestDate.toISOString().split('T')[0],
+        totalStudents: students.length,
+        recordsUpdated: verificationRecords.length,
+        absentStudents: absentees.length
+      }
     });
   } catch (error) {
     console.error('Edit attendance error:', error);

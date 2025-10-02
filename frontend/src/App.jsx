@@ -9,6 +9,7 @@ import FacultyDashboard from './pages/dashboards/FacultyDashboard';
 import StudentDashboard from './pages/dashboards/StudentDashboard';
 import ClassManagementPage from './pages/ClassManagementPage';
 import EnhancedStudentProfile from './components/EnhancedStudentProfile';
+import ReportGeneration from './components/ReportGeneration';
 import './App.css';
 
 function App() {
@@ -74,6 +75,14 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin', 'student']}>
                   <EnhancedStudentProfile />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/report-generation" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <ReportGeneration />
                 </ProtectedRoute>
               } 
             />

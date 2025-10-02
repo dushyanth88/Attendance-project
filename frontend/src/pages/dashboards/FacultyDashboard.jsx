@@ -236,6 +236,27 @@ const FacultyDashboard = () => {
               </div>
             </div>
           )}
+
+          {/* Report Generation Card */}
+          {assignedClass && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <span className="text-3xl mr-3">📝</span>
+                  <div>
+                    <p className="text-sm text-gray-600">Report Generation</p>
+                    <p className="text-sm text-gray-500">Generate absentees reports</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate('/report-generation')}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                >
+                  Generate Report
+                </button>
+              </div>
+            </div>
+          )}
           </div>
         {/* Attendance History */}
         {assignedClass && (

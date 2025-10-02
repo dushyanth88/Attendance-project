@@ -136,6 +136,17 @@ router.post('/login', [
 // @access  Private
 router.get('/me', authenticate, async (req, res) => {
   try {
+    let assignedClass = req.user.assignedClasses && req.user.assignedClasses.length > 0 ? req.user.assignedClasses[0] : undefined;
+    
+    // If user is faculty and no assignedClass found in user object, check Faculty model
+    if (req.user.role === 'faculty' && !assignedClass) {
+      const Faculty = (await import('../models/Faculty.js')).default;
+      const facultyDoc = await Faculty.findOne({ userId: req.user._id });
+      if (facultyDoc && facultyDoc.assignedClass && facultyDoc.assignedClass !== 'None') {
+        assignedClass = facultyDoc.assignedClass;
+      }
+    }
+
     res.status(200).json({
       success: true,
       user: {
@@ -145,6 +156,7 @@ router.get('/me', authenticate, async (req, res) => {
         role: req.user.role,
         department: req.user.department,
         class: req.user.class,
+        assignedClass: assignedClass,
         subjects: req.user.subjects,
         assignedClasses: req.user.assignedClasses,
         status: req.user.status,
