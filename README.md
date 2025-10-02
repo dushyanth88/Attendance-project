@@ -108,7 +108,7 @@ The application is fully responsive and optimized for:
    cd backend
    npm start
    ```
-   
+
    **Frontend Development Server:**
    ```bash
    cd frontend

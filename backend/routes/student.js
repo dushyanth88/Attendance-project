@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Student from '../models/Student.js';
 import Faculty from '../models/Faculty.js';
+import User from '../models/User.js';
 import { authenticate, facultyAndAbove } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -34,15 +35,9 @@ router.post('/create', [
     const { rollNumber, name, email, password, classAssigned } = req.body;
     const currentUser = req.user;
 
-    // Check if student already exists
-    const existingStudent = await Student.findOne({ 
-      $or: [
-        { email: email.toLowerCase() },
-        { rollNumber: rollNumber }
-      ]
-    });
-    
-    if (existingStudent) {
+    // Check if email already exists across system
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       return res.status(400).json({
         status: 'error',
         message: 'Student already exists'
@@ -63,24 +58,32 @@ router.post('/create', [
       });
     }
 
-    // Create student
-    const studentData = {
-      rollNumber,
+    // Create corresponding user for the student
+    const user = new User({
       name,
       email: email.toLowerCase(),
       password,
+      role: 'student',
+      department: currentUser.department,
+      class: classAssigned,
+      createdBy: currentUser._id
+    });
+    await user.save();
+
+    // Create student details and link userId
+    const student = new Student({
+      userId: user._id,
+      rollNumber,
+      name,
+      email: email.toLowerCase(),
       classAssigned,
       facultyId: assignedFaculty._id,
       department: currentUser.department,
       createdBy: currentUser._id
-    };
-
-    const student = new Student(studentData);
+    });
     await student.save();
 
-    // Remove password from response
     const studentResponse = student.toObject();
-    delete studentResponse.password;
 
     res.status(201).json({
       status: 'success',
@@ -89,6 +92,12 @@ router.post('/create', [
     });
   } catch (error) {
     console.error('Create student error:', error);
+    if (error?.code === 11000) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Student already exists'
+      });
+    }
     res.status(500).json({
       status: 'error',
       message: 'Server error'

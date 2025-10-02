@@ -1,12 +1,16 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 
 const studentSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   rollNumber: {
     type: String,
     required: [true, 'Roll number is required'],
     trim: true,
-    unique: true
+    unique: false
   },
   name: {
     type: String,
@@ -21,11 +25,6 @@ const studentSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
-  },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters']
   },
   classAssigned: {
     type: String,
@@ -75,26 +74,13 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Hash password before saving
-studentSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
-    next();
-  }
-  
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
+// Compound unique index to enforce roll number unique within class
+studentSchema.index({ classAssigned: 1, rollNumber: 1 }, { unique: true });
 
-// Compare password method
-studentSchema.methods.comparePassword = async function(enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
-
-// Remove password from JSON output
+// Remove password from JSON output (legacy safety if present)
 studentSchema.methods.toJSON = function() {
   const studentObject = this.toObject();
-  delete studentObject.password;
+  if (studentObject.password) delete studentObject.password;
   return studentObject;
 };
 

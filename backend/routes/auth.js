@@ -109,6 +109,7 @@ router.post('/login', [
         role: userByEmail.role,
         department: userByEmail.department,
         class: userByEmail.class,
+        assignedClass: userByEmail.assignedClasses && userByEmail.assignedClasses.length > 0 ? userByEmail.assignedClasses[0] : undefined,
         subjects: userByEmail.subjects,
         assignedClasses: userByEmail.assignedClasses,
         status: userByEmail.status,

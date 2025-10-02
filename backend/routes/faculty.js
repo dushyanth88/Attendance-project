@@ -1,6 +1,7 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Faculty from '../models/Faculty.js';
+import User from '../models/User.js';
 import { authenticate, hodAndAbove } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -33,32 +34,40 @@ router.post('/create', [
     const { name, email, password, position, assignedClass } = req.body;
     const currentUser = req.user;
 
-    // Check if faculty already exists
-    const existingFaculty = await Faculty.findOne({ email: email.toLowerCase() });
-    if (existingFaculty) {
+    // Check if faculty already exists (by user email across system)
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       return res.status(400).json({
         status: 'error',
         message: 'Faculty already exists'
       });
     }
 
-    // Create faculty
-    const facultyData = {
+    // Create corresponding user
+    const user = new User({
       name,
       email: email.toLowerCase(),
       password,
+      role: 'faculty',
+      department: currentUser.department,
+      assignedClasses: assignedClass && assignedClass !== 'None' ? [assignedClass] : [],
+      createdBy: currentUser._id
+    });
+    await user.save();
+
+    // Create faculty details and link to userId
+    const faculty = new Faculty({
+      userId: user._id,
+      name,
+      email: email.toLowerCase(),
       position,
       assignedClass,
       department: currentUser.department,
       createdBy: currentUser._id
-    };
-
-    const faculty = new Faculty(facultyData);
+    });
     await faculty.save();
 
-    // Remove password from response
     const facultyResponse = faculty.toObject();
-    delete facultyResponse.password;
 
     res.status(201).json({
       status: 'success',
@@ -67,6 +76,13 @@ router.post('/create', [
     });
   } catch (error) {
     console.error('Create faculty error:', error);
+    // Best-effort rollback if user created but faculty failed
+    if (error?.keyPattern?.email || error?.code === 11000) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Faculty already exists'
+      });
+    }
     res.status(500).json({
       status: 'error',
       message: 'Server error'

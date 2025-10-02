@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 
 const facultySchema = new mongoose.Schema({
   name: {
@@ -8,6 +7,11 @@ const facultySchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Name cannot be more than 100 characters']
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -15,11 +19,6 @@ const facultySchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
-  },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters']
   },
   position: {
     type: String,
@@ -72,26 +71,10 @@ const facultySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Hash password before saving
-facultySchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
-    next();
-  }
-  
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
-
-// Compare password method
-facultySchema.methods.comparePassword = async function(enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
-
-// Remove password from JSON output
+// Remove password from JSON output (legacy safety if present)
 facultySchema.methods.toJSON = function() {
   const facultyObject = this.toObject();
-  delete facultyObject.password;
+  if (facultyObject.password) delete facultyObject.password;
   return facultyObject;
 };
 
