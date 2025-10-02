@@ -7,6 +7,8 @@ import PrincipalDashboard from './pages/dashboards/PrincipalDashboard';
 import HODDashboard from './pages/dashboards/HODDashboard';
 import FacultyDashboard from './pages/dashboards/FacultyDashboard';
 import StudentDashboard from './pages/dashboards/StudentDashboard';
+import ClassManagementPage from './pages/ClassManagementPage';
+import EnhancedStudentProfile from './components/EnhancedStudentProfile';
 import './App.css';
 
 function App() {
@@ -56,6 +58,22 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['student']}>
                   <StudentDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/class-management/:classId" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <ClassManagementPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/students/:id" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin', 'student']}>
+                  <EnhancedStudentProfile />
                 </ProtectedRoute>
               } 
             />

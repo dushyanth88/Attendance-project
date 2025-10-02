@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Toast from './Toast';
+import { apiFetch } from '../utils/apiFetch';
 
 const StudentList = ({ assignedClass, refreshTrigger }) => {
   const [students, setStudents] = useState([]);
@@ -14,17 +15,8 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
     
     try {
       setLoading(true);
-      const response = await fetch(`/api/student/list/${assignedClass}?page=${page}&limit=10&search=${search}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const res = await apiFetch({ url: `/api/student/list/${assignedClass}?page=${page}&limit=10&search=${encodeURIComponent(search)}` });
+      const data = res.data;
       
       if (data.status === 'success') {
         setStudents(data.data.students);
@@ -62,18 +54,8 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
     }
 
     try {
-      const response = await fetch(`/api/student/delete/${studentId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const res = await apiFetch({ url: `/api/student/delete/${studentId}`, method: 'DELETE' });
+      const data = res.data;
       
       if (data.status === 'success') {
         setToast({ show: true, message: 'Student deleted successfully', type: 'success' });
@@ -154,7 +136,8 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
                 </button>
               </div>
               <p className="text-sm text-gray-600 mb-1">Roll: {student.rollNumber}</p>
-              <p className="text-sm text-gray-500">{student.email}</p>
+              <p className="text-sm text-gray-500 mb-1">{student.email}</p>
+              <p className="text-sm text-gray-500">Mobile: {student.mobile || 'N/A'}</p>
             </div>
           ))}
         </div>
@@ -174,6 +157,9 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
                   Email
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Mobile
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -189,6 +175,9 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {student.email}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {student.mobile || 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <button

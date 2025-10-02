@@ -38,6 +38,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/faculty', facultyRoutes);
 app.use('/api/student', studentRoutes);
+app.use('/api/students', studentRoutes);
+app.use('/api/classes', studentRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

@@ -13,63 +13,33 @@ const attendanceSchema = new mongoose.Schema({
   },
   date: {
     type: Date,
-    required: true,
-    default: Date.now
-  },
-  subject: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  class: {
-    type: String,
-    required: true,
-    trim: true
+    required: true
   },
   status: {
     type: String,
-    enum: ['present', 'absent', 'late', 'excused'],
+    enum: ['Present', 'Absent'],
     required: true,
-    default: 'present'
+    default: 'Present'
   },
-  remarks: {
+  reason: {
     type: String,
     trim: true,
-    maxlength: [200, 'Remarks cannot exceed 200 characters']
-  },
-  markedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  department: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  semester: {
-    type: String,
-    trim: true
-  },
-  academicYear: {
-    type: String,
-    required: true,
-    trim: true
+    maxlength: [500, 'Reason cannot exceed 500 characters'],
+    default: ''
   }
 }, {
   timestamps: true
 });
 
-// Index for efficient queries
-attendanceSchema.index({ studentId: 1, date: 1, subject: 1 });
-attendanceSchema.index({ facultyId: 1, date: 1 });
-attendanceSchema.index({ department: 1, date: 1 });
-attendanceSchema.index({ class: 1, date: 1 });
-
-// Virtual for attendance percentage
-attendanceSchema.virtual('attendancePercentage').get(function() {
-  // This would be calculated in aggregation queries
-  return null;
+// Ensure date has no time component (normalize to midnight)
+attendanceSchema.pre('save', function(next) {
+  if (this.date instanceof Date) {
+    this.date.setHours(0, 0, 0, 0);
+  }
+  next();
 });
+
+// Unique attendance record per student per day
+attendanceSchema.index({ studentId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model('Attendance', attendanceSchema);

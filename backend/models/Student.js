@@ -34,6 +34,22 @@ const studentSchema = new mongoose.Schema({
       message: 'Class must be one of: 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B'
     }
   },
+  year: {
+    type: String,
+    required: [true, 'Year is required'],
+    enum: {
+      values: ['1st', '2nd', '3rd', '4th'],
+      message: 'Year must be one of: 1st, 2nd, 3rd, 4th'
+    }
+  },
+  semester: {
+    type: String,
+    required: [true, 'Semester is required'],
+    enum: {
+      values: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sem 5', 'Sem 6', 'Sem 7', 'Sem 8'],
+      message: 'Semester must be one of: Sem 1 ... Sem 8'
+    }
+  },
   facultyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Faculty',
@@ -57,6 +73,17 @@ const studentSchema = new mongoose.Schema({
   phone: {
     type: String,
     trim: true
+  },
+  mobile: {
+    type: String,
+    required: [true, 'Mobile number is required'],
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^[0-9]{10}$/.test(v);
+      },
+      message: 'Mobile number must be exactly 10 digits'
+    }
   },
   address: {
     type: String,

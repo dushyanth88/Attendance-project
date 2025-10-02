@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Toast from './Toast';
+import { apiFetch } from '../utils/apiFetch';
 
 const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }) => {
   const { user } = useAuth();
@@ -8,7 +9,10 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
     rollNumber: '',
     name: '',
     email: '',
-    password: ''
+    mobile: '',
+    password: '',
+    year: '1st',
+    semester: 'Sem 1'
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -47,6 +51,12 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       newErrors.email = 'Please enter a valid email';
     }
 
+    if (!formData.mobile.trim()) {
+      newErrors.mobile = 'Mobile number is required';
+    } else if (!/^[0-9]{10}$/.test(formData.mobile)) {
+      newErrors.mobile = 'Mobile number must be exactly 10 digits';
+    }
+
     if (!formData.password) {
       newErrors.password = 'Password is required';
     } else if (formData.password.length < 6) {
@@ -68,36 +78,12 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
     try {
       console.log('Creating student with data:', { ...formData, classAssigned: assignedClass });
       
-      const response = await fetch('/api/student/create', {
+      const res = await apiFetch({
+        url: '/api/student/create',
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        },
-        body: JSON.stringify({
-          ...formData,
-          classAssigned: assignedClass
-        })
+        data: { ...formData, classAssigned: assignedClass }
       });
-
-      console.log('Response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Response error:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-      }
-
-      const contentType = response.headers.get('content-type');
-      console.log('Content-Type:', contentType);
-      
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error('Non-JSON response:', text);
-        throw new Error(`Expected JSON response but got: ${text}`);
-      }
-
-      const data = await response.json();
+      const data = res.data;
       console.log('Response data:', data);
 
       if (data.status === 'success') {
@@ -109,7 +95,10 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
           rollNumber: '',
           name: '',
           email: '',
-          password: ''
+          mobile: '',
+          password: '',
+          year: '1st',
+          semester: 'Sem 1'
         });
       } else {
         setToast({ show: true, message: data.message || 'Failed to add student', type: 'error' });
@@ -137,7 +126,10 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       rollNumber: '',
       name: '',
       email: '',
-      password: ''
+      mobile: '',
+      password: '',
+      year: '1st',
+      semester: 'Sem 1'
     });
     setErrors({});
     onClose();
@@ -230,6 +222,28 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                 )}
               </div>
 
+              {/* Mobile Number */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Mobile Number
+                </label>
+                <input
+                  type="tel"
+                  name="mobile"
+                  value={formData.mobile}
+                  onChange={handleInputChange}
+                  pattern="[0-9]{10}"
+                  className={`w-full px-3 py-2.5 sm:py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px] ${
+                    errors.mobile ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  placeholder="Enter mobile number (10 digits)"
+                  maxLength="10"
+                />
+                {errors.mobile && (
+                  <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.mobile}</p>
+                )}
+              </div>
+
               {/* Password */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -249,6 +263,46 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                   <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.password}</p>
                 )}
               </div>
+
+            {/* Year & Semester */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
+                <select
+                  name="year"
+                  value={formData.year}
+                  onChange={handleInputChange}
+                  className={`w-full px-3 py-2.5 sm:py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px] ${
+                    errors.year ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                >
+                  {['1st','2nd','3rd','4th'].map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                {errors.year && (
+                  <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.year}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Semester</label>
+                <select
+                  name="semester"
+                  value={formData.semester}
+                  onChange={handleInputChange}
+                  className={`w-full px-3 py-2.5 sm:py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px] ${
+                    errors.semester ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                >
+                  {['Sem 1','Sem 2','Sem 3','Sem 4','Sem 5','Sem 6','Sem 7','Sem 8'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {errors.semester && (
+                  <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.semester}</p>
+                )}
+              </div>
+            </div>
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row sm:justify-end space-y-2 sm:space-y-0 sm:space-x-3 pt-4">

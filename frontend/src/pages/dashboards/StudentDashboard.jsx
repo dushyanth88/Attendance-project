@@ -1,7 +1,33 @@
 import { useAuth } from '../../context/AuthContext';
+import { useEffect, useState } from 'react';
 
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
+  const [todayStatus, setTodayStatus] = useState('-');
+  const [overall, setOverall] = useState('-');
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    const fetchAttendance = async () => {
+      try {
+        if (!user?.id) return;
+        const res = await fetch(`/api/attendance/student/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+        });
+        const data = await res.json();
+        if (res.ok && data && Array.isArray(data.attendance)) {
+          setHistory(data.attendance);
+          setOverall(data.overall_percentage || '-');
+          const today = new Date().toISOString().slice(0,10);
+          const todayRec = data.attendance.find(a => a.date === today);
+          setTodayStatus(todayRec ? todayRec.status : '-');
+        }
+      } catch (e) {
+        // noop for now
+      }
+    };
+    fetchAttendance();
+  }, [user]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -36,7 +62,7 @@ const StudentDashboard = () => {
               <span className="text-3xl mr-3">📊</span>
               <div>
                 <p className="text-sm text-gray-600">Overall Attendance</p>
-                <p className="text-2xl font-bold text-green-600">94.2%</p>
+                <p className="text-2xl font-bold text-green-600">{overall}</p>
               </div>
             </div>
           </div>
@@ -74,33 +100,10 @@ const StudentDashboard = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center mb-4">
               <span className="text-3xl mr-3">📅</span>
-              <h3 className="text-lg font-semibold">Today's Schedule</h3>
+              <h3 className="text-lg font-semibold">Today's Status</h3>
             </div>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg border-l-4 border-green-500">
-                <div>
-                  <p className="font-medium">Data Structures</p>
-                  <p className="text-sm text-gray-600">9:00 AM - 10:30 AM</p>
-                  <p className="text-sm text-green-600">✅ Present</p>
-                </div>
-                <span className="text-green-600">✅</span>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
-                <div>
-                  <p className="font-medium">Algorithms</p>
-                  <p className="text-sm text-gray-600">11:00 AM - 12:30 PM</p>
-                  <p className="text-sm text-blue-600">⏰ Upcoming</p>
-                </div>
-                <span className="text-blue-600">⏰</span>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border-l-4 border-gray-500">
-                <div>
-                  <p className="font-medium">Database Systems</p>
-                  <p className="text-sm text-gray-600">2:00 PM - 3:30 PM</p>
-                  <p className="text-sm text-gray-600">📅 Later</p>
-                </div>
-                <span className="text-gray-600">📅</span>
-              </div>
+            <div className={`p-4 rounded-lg ${todayStatus === 'Present' ? 'bg-green-50 border-l-4 border-green-500' : todayStatus === 'Absent' ? 'bg-red-50 border-l-4 border-red-500' : 'bg-gray-50 border'}`}>
+              <p className="font-medium">{todayStatus === '-' ? 'No record for today' : todayStatus}</p>
             </div>
           </div>
 
@@ -150,34 +153,24 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {/* Recent Attendance */}
+          {/* Attendance History */}
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center mb-4">
               <span className="text-3xl mr-3">🕒</span>
-              <h3 className="text-lg font-semibold">Recent Attendance</h3>
+              <h3 className="text-lg font-semibold">Attendance History</h3>
             </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">Data Structures</p>
-                  <p className="text-sm text-gray-600">Today, 9:00 AM</p>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {history.length === 0 && (
+                <div className="p-3 bg-gray-50 rounded-lg text-gray-600 text-sm">No attendance records found.</div>
+              )}
+              {history.map((rec, idx) => (
+                <div key={`${rec.date}-${idx}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="font-medium">{rec.date}</p>
+                  </div>
+                  <span className={`${rec.status === 'Present' ? 'text-green-600' : 'text-red-600'} font-semibold`}>{rec.status}</span>
                 </div>
-                <span className="text-green-600 font-semibold">Present</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">Algorithms</p>
-                  <p className="text-sm text-gray-600">Yesterday, 11:00 AM</p>
-                </div>
-                <span className="text-green-600 font-semibold">Present</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">Database Systems</p>
-                  <p className="text-sm text-gray-600">2 days ago, 2:00 PM</p>
-                </div>
-                <span className="text-red-600 font-semibold">Absent</span>
-              </div>
+              ))}
             </div>
           </div>
 

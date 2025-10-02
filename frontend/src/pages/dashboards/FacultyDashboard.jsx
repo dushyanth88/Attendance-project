@@ -1,13 +1,43 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import CreateStudentModal from '../../components/CreateStudentModal';
 import StudentList from '../../components/StudentList';
+import Toast from '../../components/Toast';
+import { apiFetch } from '../../utils/apiFetch';
 
 const FacultyDashboard = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [assignedClass, setAssignedClass] = useState(null);
   const [showCreateStudentModal, setShowCreateStudentModal] = useState(false);
   const [studentRefreshTrigger, setStudentRefreshTrigger] = useState(0);
+  const [attendanceForm, setAttendanceForm] = useState({ date: new Date().toISOString().slice(0,10), absentees: '' });
+  const [attendanceToast, setAttendanceToast] = useState({ show: false, message: '', type: 'success' });
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0,10));
+  const [historyRows, setHistoryRows] = useState([]);
+  const [totalStudentsCount, setTotalStudentsCount] = useState(0);
+
+  // Fetch student count for the assigned class using Student Management endpoint
+  const fetchStudentCount = useCallback(async (classId) => {
+    if (!classId) return;
+    
+    try {
+      const res = await apiFetch({ 
+        url: `/api/student/list/${classId}?limit=1000` // Use same endpoint as Student Management
+      });
+      
+      if (res.data.status === 'success' && res.data.data && Array.isArray(res.data.data.students)) {
+        setTotalStudentsCount(res.data.data.students.length);
+      } else {
+        setTotalStudentsCount(0);
+      }
+    } catch (error) {
+      console.error('Error fetching student count:', error);
+      setTotalStudentsCount(0);
+    }
+  }, []);
 
   // Check if faculty is assigned as class teacher
   useEffect(() => {
@@ -27,6 +57,52 @@ const FacultyDashboard = () => {
 
     checkAssignedClass();
   }, [user]);
+
+  // Fetch student count when assigned class changes
+  useEffect(() => {
+    if (assignedClass) {
+      fetchStudentCount(assignedClass);
+    }
+  }, [assignedClass, studentRefreshTrigger, fetchStudentCount]);
+
+  const handleAttendanceChange = (e) => {
+    const { name, value } = e.target;
+    setAttendanceForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleMarkAttendance = async (e) => {
+    e.preventDefault();
+    if (!assignedClass) return;
+    setAttendanceLoading(true);
+    try {
+      // Parse roll numbers as integers
+      const absentRollNumbers = attendanceForm.absentees
+        .split(',')
+        .map(num => parseInt(num.trim()))
+        .filter(num => !isNaN(num));
+      
+      const res = await apiFetch({
+        url: '/api/attendance/mark',
+        method: 'POST',
+        data: { 
+          classId: assignedClass, 
+          date: attendanceForm.date, 
+          absentRollNumbers: absentRollNumbers 
+        }
+      });
+      const data = res.data;
+      if (data.status === 'success') {
+        setAttendanceToast({ show: true, message: data.message || `Attendance marked successfully for ${assignedClass} on ${attendanceForm.date}.`, type: 'success' });
+      } else {
+        throw new Error(data.message || 'Error saving attendance');
+      }
+    } catch (err) {
+      const errorMessage = err.response?.data?.message || err.message || 'Error saving attendance';
+      setAttendanceToast({ show: true, message: errorMessage, type: 'error' });
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -67,173 +143,160 @@ const FacultyDashboard = () => {
           </div>
         )}
 
-        {/* Quick Actions */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button className="bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 transition-colors text-left">
-              <div className="flex items-center">
-                <span className="text-2xl mr-3">✅</span>
-                <div>
-                  <h3 className="font-semibold">Mark Attendance</h3>
-                  <p className="text-sm opacity-90">Take attendance for today's class</p>
-                </div>
-              </div>
-            </button>
-            <button className="bg-blue-600 text-white p-4 rounded-lg hover:bg-blue-700 transition-colors text-left">
-              <div className="flex items-center">
-                <span className="text-2xl mr-3">📊</span>
-                <div>
-                  <h3 className="font-semibold">View Reports</h3>
-                  <p className="text-sm opacity-90">Check student attendance reports</p>
-                </div>
-              </div>
-            </button>
-            <button className="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700 transition-colors text-left">
-              <div className="flex items-center">
-                <span className="text-2xl mr-3">📚</span>
-                <div>
-                  <h3 className="font-semibold">My Classes</h3>
-                  <p className="text-sm opacity-90">Manage your classes and schedules</p>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
+        {/* Cleaner UI: removed non-functional widgets */}
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {/* Attendance Section */}
+        {assignedClass && (
+          <div className="mb-8 bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-lg font-semibold mb-4">Attendance - {assignedClass}</h3>
+            <form onSubmit={handleMarkAttendance} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
+              </div>
+                <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                <input type="date" name="date" value={attendanceForm.date} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
+                </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Absent Roll Numbers (comma-separated)</label>
+                <input type="text" name="absentees" value={attendanceForm.absentees} onChange={handleAttendanceChange} placeholder="e.g., 44, 7" className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={attendanceLoading} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">
+                  {attendanceLoading ? 'Saving...' : 'Mark Attendance'}
+            </button>
+                <button type="button" onClick={async () => {
+                  setAttendanceLoading(true);
+                  try {
+                    // Parse roll numbers as integers
+                    const absentRollNumbers = attendanceForm.absentees
+                      .split(',')
+                      .map(num => parseInt(num.trim()))
+                      .filter(num => !isNaN(num));
+                    
+                    const today = new Date().toISOString().slice(0,10);
+                    const res = await apiFetch({ 
+                      url: '/api/attendance/edit', 
+                      method: 'PUT', 
+                      data: { 
+                        classId: assignedClass, 
+                        date: today,
+                        absentRollNumbers: absentRollNumbers 
+                      } 
+                    });
+                    const data = res.data;
+                    if (data.status === 'success') {
+                      setAttendanceToast({ show: true, message: data.message || `Today's attendance updated for ${assignedClass}.`, type: 'success' });
+                    } else {
+                      throw new Error(data.message || 'Failed to update attendance');
+                    }
+                  } catch (e) {
+                    const errorMessage = e.response?.data?.message || e.message || 'Failed to update attendance';
+                    setAttendanceToast({ show: true, message: errorMessage, type: 'error' });
+                  } finally {
+                    setAttendanceLoading(false);
+                  }
+                }} disabled={attendanceLoading} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">Edit Today's Attendance</button>
+                </div>
+            </form>
+              </div>
+        )}
+
+        {/* Stats Overview with Class Management */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
             <div className="flex items-center">
               <span className="text-3xl mr-3">🎒</span>
               <div>
-                <p className="text-sm text-gray-600">Total Students</p>
-                <p className="text-2xl font-bold text-gray-900">156</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center">
-              <span className="text-3xl mr-3">📚</span>
-              <div>
-                <p className="text-sm text-gray-600">Active Classes</p>
-                <p className="text-2xl font-bold text-gray-900">8</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center">
-              <span className="text-3xl mr-3">📅</span>
-              <div>
-                <p className="text-sm text-gray-600">Classes Today</p>
-                <p className="text-2xl font-bold text-gray-900">3</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center">
-              <span className="text-3xl mr-3">📊</span>
-              <div>
-                <p className="text-sm text-gray-600">Avg. Attendance</p>
-                <p className="text-2xl font-bold text-green-600">92.1%</p>
+                  <p className="text-sm text-gray-600">Total Students in {assignedClass}</p>
+                  <p className="text-2xl font-bold text-gray-900">{totalStudentsCount}</p>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Today's Classes */}
+          {assignedClass && (
           <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center mb-4">
-              <span className="text-3xl mr-3">📅</span>
-              <h3 className="text-lg font-semibold">Today's Classes</h3>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <span className="text-3xl mr-3">👥</span>
                 <div>
-                  <p className="font-medium">Data Structures</p>
-                  <p className="text-sm text-gray-600">9:00 AM - 10:30 AM</p>
+                    <p className="text-sm text-gray-600">Class Management</p>
+                    <p className="text-sm text-gray-500">View & manage students</p>
                 </div>
-                <button className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
-                  Mark Attendance
-                </button>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">Algorithms</p>
-                  <p className="text-sm text-gray-600">11:00 AM - 12:30 PM</p>
-                </div>
-                <button className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
-                  Mark Attendance
-                </button>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">Database Systems</p>
-                  <p className="text-sm text-gray-600">2:00 PM - 3:30 PM</p>
-                </div>
-                <button className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
-                  Mark Attendance
+                <button
+                  onClick={() => navigate(`/class-management/${assignedClass}`)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  Manage Class
                 </button>
               </div>
             </div>
+          )}
           </div>
-
-          {/* Recent Activity */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center mb-4">
-              <span className="text-3xl mr-3">🕒</span>
-              <h3 className="text-lg font-semibold">Recent Activity</h3>
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-green-600 mr-3">✅</span>
+        {/* Attendance History */}
+        {assignedClass && (
+          <div className="mb-8 bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-lg font-semibold mb-4">Attendance History</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                 <div>
-                  <p className="text-sm">Marked attendance for Data Structures</p>
-                  <p className="text-xs text-gray-500">2 hours ago</p>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
+              </div>
+                <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                <input type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+                <div>
+                <button type="button" onClick={async () => {
+                  try {
+                    const res = await apiFetch({ 
+                      url: `/api/attendance/history?classId=${encodeURIComponent(assignedClass)}&date=${encodeURIComponent(historyDate)}` 
+                    });
+                    const data = res.data;
+                    if (data.status === 'success') {
+                      setHistoryRows(data.data?.records || []);
+                    } else {
+                      setHistoryRows([]);
+                    }
+                  } catch (error) {
+                    console.error('Error fetching history:', error);
+                    setHistoryRows([]);
+                  }
+                }} className="w-full bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition-colors">View Attendance</button>
                 </div>
               </div>
-              <div className="flex items-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-blue-600 mr-3">📊</span>
-                <div>
-                  <p className="text-sm">Generated weekly report</p>
-                  <p className="text-xs text-gray-500">1 day ago</p>
-                </div>
-              </div>
-              <div className="flex items-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-purple-600 mr-3">📚</span>
-                <div>
-                  <p className="text-sm">Updated class schedule</p>
-                  <p className="text-xs text-gray-500">3 days ago</p>
-                </div>
-              </div>
+            <div className="mt-4 border rounded-lg overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Roll No</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {historyRows.length === 0 && (
+                    <tr>
+                      <td colSpan="3" className="px-6 py-4 text-sm text-gray-500">No records found.</td>
+                    </tr>
+                  )}
+                  {historyRows.map((r, idx) => (
+                    <tr key={`${r.rollNumber || r.rollNo}-${idx}`}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.rollNumber || r.rollNo}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.name}</td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${r.status === 'Present' ? 'text-green-600' : 'text-red-600'}`}>{r.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
+        )}
 
-          {/* Student Performance */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center mb-4">
-              <span className="text-3xl mr-3">📈</span>
-              <h3 className="text-lg font-semibold">Student Performance</h3>
-            </div>
-            <p className="text-gray-600 mb-4">View detailed student attendance and performance metrics</p>
-            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-              View Performance
-            </button>
-          </div>
-
-          {/* Class Management */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center mb-4">
-              <span className="text-3xl mr-3">⚙️</span>
-              <h3 className="text-lg font-semibold">Class Management</h3>
-            </div>
-            <p className="text-gray-600 mb-4">Manage your classes, schedules, and student lists</p>
-            <button className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors">
-              Manage Classes
-            </button>
-          </div>
-        </div>
 
         {/* Student Management Section - Only show if faculty is class teacher */}
         {assignedClass && (
@@ -265,6 +328,15 @@ const FacultyDashboard = () => {
         onStudentCreated={() => setStudentRefreshTrigger(prev => prev + 1)}
         assignedClass={assignedClass}
       />
+
+      {/* Toast Notifications */}
+      {attendanceToast.show && (
+        <Toast
+          message={attendanceToast.message}
+          type={attendanceToast.type}
+          onClose={() => setAttendanceToast({ show: false, message: '', type: 'success' })}
+        />
+      )}
     </div>
   );
 };
