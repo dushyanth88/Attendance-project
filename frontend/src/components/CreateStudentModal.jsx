@@ -12,11 +12,14 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
     mobile: '',
     password: '',
     year: '1st',
-    semester: 'Sem 1'
+    semester: 'Sem 1',
+    department: user?.department || ''
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+
+  const departments = ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'];
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -63,6 +66,10 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       newErrors.password = 'Password must be at least 6 characters';
     }
 
+    if (!formData.department) {
+      newErrors.department = 'Department is required';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -87,7 +94,8 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       console.log('Response data:', data);
 
       if (data.status === 'success') {
-        setToast({ show: true, message: 'Student added successfully!', type: 'success' });
+        const departmentMessage = formData.department ? ` to ${formData.department} department` : '';
+        setToast({ show: true, message: `Student added successfully${departmentMessage}!`, type: 'success' });
         onClose();
         onStudentCreated && onStudentCreated();
         // Reset form
@@ -98,7 +106,8 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
           mobile: '',
           password: '',
           year: '1st',
-          semester: 'Sem 1'
+          semester: 'Sem 1',
+          department: user?.department || ''
         });
       } else {
         setToast({ show: true, message: data.message || 'Failed to add student', type: 'error' });
@@ -129,7 +138,8 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       mobile: '',
       password: '',
       year: '1st',
-      semester: 'Sem 1'
+      semester: 'Sem 1',
+      department: user?.department || ''
     });
     setErrors({});
     onClose();
@@ -261,6 +271,33 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                 />
                 {errors.password && (
                   <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.password}</p>
+                )}
+              </div>
+
+              {/* Department */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Department *
+                </label>
+                <select
+                  name="department"
+                  value={formData.department}
+                  onChange={handleInputChange}
+                  disabled={user?.role === 'faculty' || user?.role === 'hod'}
+                  className={`w-full px-3 py-2.5 sm:py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px] ${
+                    errors.department ? 'border-red-500' : 'border-gray-300'
+                  } ${(user?.role === 'faculty' || user?.role === 'hod') ? 'bg-gray-100' : ''}`}
+                >
+                  <option value="">Select Department</option>
+                  {departments.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+                {errors.department && (
+                  <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.department}</p>
+                )}
+                {(user?.role === 'faculty' || user?.role === 'hod') && (
+                  <p className="text-xs text-gray-500 mt-1">Department is auto-assigned based on your role</p>
                 )}
               </div>
 

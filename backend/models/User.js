@@ -34,7 +34,21 @@ const userSchema = new mongoose.Schema({
     required: function() {
       return ['hod', 'faculty', 'student'].includes(this.role);
     },
-    trim: true
+    trim: true,
+    enum: {
+      values: ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'],
+      message: 'Department must be one of: CSE, IT, ECE, EEE, Civil, Mechanical, CSBS, AIDS'
+    },
+    validate: {
+      validator: function(v) {
+        // Only validate enum if department is required (i.e., for hod, faculty, student)
+        if (['hod', 'faculty', 'student'].includes(this.role)) {
+          return ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'].includes(v);
+        }
+        return true;
+      },
+      message: 'Department must be one of: CSE, IT, ECE, EEE, Civil, Mechanical, CSBS, AIDS'
+    }
   },
   class: {
     type: String,
@@ -42,6 +56,17 @@ const userSchema = new mongoose.Schema({
       return this.role === 'student';
     },
     trim: true
+  },
+  mobile: {
+    type: String,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        if (!v) return true; // Allow empty mobile
+        return /^\d{10}$/.test(v);
+      },
+      message: 'Mobile number must be exactly 10 digits'
+    }
   },
   subjects: [{
     type: String,

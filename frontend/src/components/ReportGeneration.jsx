@@ -1,119 +1,173 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../utils/apiFetch';
 import Toast from './Toast';
 
 const ReportGeneration = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
+  const facultyProfile = location.state?.facultyProfile;
 
   // Form state
-  const [selectedClass, setSelectedClass] = useState('');
-  const [reportType, setReportType] = useState('single'); // 'single' or 'range'
-  const [selectedDate, setSelectedDate] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [filters, setFilters] = useState({
+    batch: '',
+    year: '',
+    semester: '',
+    section: '',
+    reportType: 'single', // single, range, cumulative
+    date: new Date().toISOString().split('T')[0],
+    startDate: '',
+    endDate: ''
+  });
 
   // Report data state
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
   // Edit reason state
-  const [editingReasonId, setEditingReasonId] = useState(null);
-  const [editReasonValue, setEditReasonValue] = useState('');
-  const [reasonLoading, setReasonLoading] = useState(false);
-
-  const classOptions = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B'];
+  const [editingRow, setEditingRow] = useState(null);
+  const [editData, setEditData] = useState({ reason: '', actionTaken: '' });
 
   useEffect(() => {
-    // Set default class to user's assigned class
-    if (user?.assignedClass) {
-      setSelectedClass(user.assignedClass);
-    }
-    
     // Set default date to today
     const today = new Date().toISOString().split('T')[0];
-    setSelectedDate(today);
-  }, [user]);
+    
+    // Pre-fill form with faculty profile data if available
+    if (facultyProfile) {
+      setFilters(prev => ({
+        ...prev,
+        batch: facultyProfile.batch || '',
+        year: facultyProfile.year || '',
+        semester: facultyProfile.semester || '',
+        section: facultyProfile.section || '',
+        date: today
+      }));
+      setInitialLoading(false);
+    } else {
+      // If no faculty profile passed, try to fetch it
+      const fetchFacultyProfile = async () => {
+        try {
+          const response = await apiFetch({
+            url: '/api/faculty/profile',
+            method: 'GET'
+          });
+          
+          // apiFetch returns the full axios response, so data is in response.data
+          const responseData = response.data;
+          
+          if (responseData.status === 'success' && responseData.data) {
+            const profile = responseData.data;
+            setFilters(prev => ({
+              ...prev,
+              batch: profile.batch || '',
+              year: profile.year || '',
+              semester: profile.semester || '',
+              section: profile.section || '',
+              date: today
+            }));
+          }
+        } catch (error) {
+          console.log('Could not fetch faculty profile:', error);
+          // Just set the date if we can't fetch profile
+          setFilters(prev => ({
+            ...prev,
+            date: today
+          }));
+        } finally {
+          setInitialLoading(false);
+        }
+      };
+      
+      fetchFacultyProfile();
+    }
+  }, [facultyProfile]);
+
+  const handleFilterChange = (field, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const handleGenerateReport = async () => {
+    if (!filters.batch || !filters.year || !filters.semester) {
+      setError('Please fill in all required fields (Batch, Year, Semester)');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
+      const params = new URLSearchParams({
+        batch: filters.batch,
+        year: filters.year,
+        semester: filters.semester
+      });
 
-      // Build query parameters
-      const params = new URLSearchParams();
-      params.append('class_id', selectedClass);
+      if (filters.section) params.append('section', filters.section);
 
-      if (reportType === 'single') {
-        if (!selectedDate) {
-          setError('Please select a date');
-          return;
-        }
-        params.append('date', selectedDate);
-      } else {
-        if (!startDate || !endDate) {
-          setError('Please select both start and end dates');
-          return;
-        }
-        if (new Date(startDate) > new Date(endDate)) {
-          setError('Start date cannot be after end date');
-          return;
-        }
-        params.append('startDate', startDate);
-        params.append('endDate', endDate);
+      if (filters.reportType === 'single' && filters.date) {
+        params.append('date', filters.date);
+      } else if (filters.reportType === 'range' && filters.startDate && filters.endDate) {
+        params.append('startDate', filters.startDate);
+        params.append('endDate', filters.endDate);
       }
+
+      console.log('📊 Sending report request with params:', {
+        batch: filters.batch,
+        year: filters.year,
+        semester: filters.semester,
+        section: filters.section,
+        reportType: filters.reportType,
+        date: filters.date,
+        startDate: filters.startDate,
+        endDate: filters.endDate
+      });
 
       const response = await apiFetch({
-        url: `/api/report/absentees?${params.toString()}`
+        url: `/api/report/enhanced-absentees?${params.toString()}`,
+        method: 'GET'
       });
 
-      // Debug logging (can be removed in production)
-      console.log('📊 Report generated:', {
-        class: response.data.data?.class,
-        attendanceMarked: response.data.data?.attendanceMarked,
-        totalAbsentees: response.data.data?.totalAbsentees
-      });
+      console.log('📊 Report response:', response);
 
-      setReportData(response.data.data);
-      
-      const absentees = response.data.data?.absentees || [];
-      const attendanceMarked = response.data.data?.attendanceMarked;
-      const message = response.data.data?.message;
+      // apiFetch returns the full axios response, so data is in response.data
+      const responseData = response.data;
 
-      // Handle different cases with appropriate toast notifications
-      if (!attendanceMarked) {
-        // Case 3: No attendance marked for this date
+      if (responseData.status === 'success') {
+        console.log('📊 Report data received:', responseData.data);
+        setReportData(responseData.data);
         setToast({
           show: true,
-          message: message || 'Attendance not taken for this date.',
-          type: 'warning'
-        });
-      } else if (absentees.length === 0) {
-        // Case 2: Attendance exists but no absentees (all present)
-        setToast({
-          show: true,
-          message: message || 'All students were present on this date.',
+          message: 'Enhanced report generated successfully',
           type: 'success'
         });
       } else {
-        // Case 1: Attendance exists and absentees found
+        setError(responseData.message || 'Failed to generate report');
         setToast({
           show: true,
-          message: `Absentees report generated successfully. Found ${response.data.data?.totalAbsentees || absentees.length} absentees.`,
-          type: 'success'
+          message: responseData.message || 'Failed to generate report',
+          type: 'error'
         });
       }
-
-    } catch (err) {
-      console.error('Error generating report:', err);
-      setError(err.response?.data?.message || 'Failed to generate report');
+    } catch (error) {
+      console.error('Generate report error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to generate report. Please try again.';
+      setError(errorMessage);
       setToast({
         show: true,
-        message: err.response?.data?.message || 'Failed to generate report',
+        message: errorMessage,
         type: 'error'
       });
     } finally {
@@ -121,167 +175,146 @@ const ReportGeneration = () => {
     }
   };
 
-  const handleEditReason = (absenteeId, currentReason) => {
-    if (!absenteeId) return;
-    setEditingReasonId(absenteeId);
-    setEditReasonValue(currentReason || '');
+  const handleEditStart = (row) => {
+    setEditingRow(row.sNo);
+    setEditData({
+      reason: row.reason || '',
+      actionTaken: row.actionTaken || ''
+    });
   };
 
-  const handleSaveReason = async (absenteeId) => {
-    if (!absenteeId) return;
-    
+  const handleEditSave = async (studentId) => {
     try {
-      setReasonLoading(true);
-      
-      await apiFetch({
-        url: `/api/attendance/${absenteeId}/reason`,
-        method: 'PUT',
-        data: { reason: editReasonValue }
+      console.log('💾 Saving absence details:', {
+        studentId,
+        reason: editData.reason,
+        actionTaken: editData.actionTaken
       });
 
-      // Update the local report data
+      const response = await apiFetch({
+        url: '/api/report/update-absence-details',
+        method: 'PUT',
+        data: {
+          studentId,
+          reason: editData.reason,
+          actionTaken: editData.actionTaken
+        }
+      });
+
+      // apiFetch returns the full axios response, so data is in response.data
+      const responseData = response.data;
+
+      if (responseData.status === 'success') {
+        // Update the report data
       setReportData(prev => ({
         ...prev,
-        absentees: (prev?.absentees || []).map(absentee =>
-          absentee?.id === absenteeId
-            ? { ...absentee, reason: editReasonValue }
-            : absentee
+          reportData: prev.reportData.map(row => 
+            row.regNo === responseData.data.rollNumber 
+              ? { ...row, reason: editData.reason, actionTaken: editData.actionTaken }
+              : row
         )
       }));
-
-      setEditingReasonId(null);
-      setEditReasonValue('');
-      
+        setEditingRow(null);
       setToast({
         show: true,
-        message: 'Reason updated successfully.',
+          message: 'Details updated successfully',
         type: 'success'
       });
-
-    } catch (err) {
-      console.error('Error updating reason:', err);
-      setToast({
+      } else {
+        setToast({
         show: true,
-        message: err.response?.data?.message || 'Failed to update reason.',
+          message: responseData.message || 'Failed to update details',
         type: 'error'
       });
-    } finally {
-      setReasonLoading(false);
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setEditingReasonId(null);
-    setEditReasonValue('');
-  };
-
-  const handleDownloadPDF = async () => {
-    try {
-      const params = new URLSearchParams();
-      params.append('class_id', selectedClass);
-
-      if (reportType === 'single') {
-        params.append('date', selectedDate);
-      } else {
-        params.append('startDate', startDate);
-        params.append('endDate', endDate);
       }
-
-      // Get the auth token
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      
-      const response = await fetch(`http://localhost:5000/api/report/absentees/export/pdf?${params.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('PDF download error:', response.status, errorText);
-        throw new Error(`Failed to download PDF: ${response.status}`);
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `absentees-report-${selectedClass}-${new Date().toISOString().split('T')[0]}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
+    } catch (error) {
+      console.error('Update details error:', error);
       setToast({
         show: true,
-        message: 'PDF downloaded successfully.',
-        type: 'success'
-      });
-
-    } catch (err) {
-      console.error('Error downloading PDF:', err);
-      setToast({
-        show: true,
-        message: err.message || 'Failed to download PDF.',
+        message: 'Failed to update details. Please try again.',
         type: 'error'
       });
     }
   };
 
-  const handleDownloadExcel = async () => {
-    try {
-      const params = new URLSearchParams();
-      params.append('class_id', selectedClass);
+  const handleEditCancel = () => {
+    setEditingRow(null);
+    setEditData({ reason: '', actionTaken: '' });
+  };
 
-      if (reportType === 'single') {
-        params.append('date', selectedDate);
-      } else {
-        params.append('startDate', startDate);
-        params.append('endDate', endDate);
+  const exportReport = async (format) => {
+    if (!reportData) {
+      setToast({
+        show: true,
+        message: 'Please generate a report first',
+        type: 'error'
+      });
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        batch: filters.batch,
+        year: filters.year,
+        semester: filters.semester
+      });
+
+      if (filters.section) params.append('section', filters.section);
+      if (filters.reportType === 'single' && filters.date) {
+        params.append('date', filters.date);
+      } else if (filters.reportType === 'range' && filters.startDate && filters.endDate) {
+        params.append('startDate', filters.startDate);
+        params.append('endDate', filters.endDate);
       }
 
-      // Get the auth token
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      console.log('📤 Exporting report:', {
+        format,
+        params: params.toString(),
+        url: `/api/report/enhanced-absentees/export/${format}?${params.toString()}`
+      });
 
-      const response = await fetch(`http://localhost:5000/api/report/absentees/export/excel?${params.toString()}`, {
+      const response = await fetch(`/api/report/enhanced-absentees/export/${format}?${params.toString()}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Excel download error:', response.status, errorText);
-        throw new Error(`Failed to download Excel: ${response.status}`);
-      }
+      console.log('📤 Export response:', {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText
+      });
 
+      if (response.ok) {
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.style.display = 'none';
       a.href = url;
-      a.download = `absentees-report-${selectedClass}-${new Date().toISOString().split('T')[0]}.xlsx`;
+        a.download = `enhanced-absentees-report-${filters.batch}-${filters.year}-Sem${filters.semester}${filters.section ? `-${filters.section}` : ''}-${new Date().toISOString().split('T')[0]}.${format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-
       setToast({
         show: true,
-        message: 'Excel file downloaded successfully.',
+          message: `${format.toUpperCase()} report exported successfully`,
         type: 'success'
       });
-
-    } catch (err) {
-      console.error('Error downloading Excel:', err);
+      } else {
+        const errorText = await response.text();
+        console.error('Export error response:', errorText);
+        setToast({
+        show: true,
+          message: `Failed to export ${format.toUpperCase()} report: ${response.status} ${response.statusText}`,
+        type: 'error'
+      });
+      }
+    } catch (error) {
+      console.error('Export error:', error);
       setToast({
         show: true,
-        message: err.message || 'Failed to download Excel file.',
+        message: `Failed to export ${format.toUpperCase()} report. Please try again.`,
         type: 'error'
       });
     }
@@ -307,67 +340,163 @@ const ReportGeneration = () => {
               </svg>
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">📝 Report Generation</h1>
-              <p className="text-gray-600 text-sm">Generate absentees reports with reasons</p>
+              <h1 className="text-2xl font-bold text-gray-900">📝 Enhanced Report Generation</h1>
+              <p className="text-gray-600 text-sm">Generate detailed absentees reports with cumulative data</p>
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filters Panel */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8 border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Report Filters</h3>
+        {initialLoading ? (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8 border border-gray-200">
+            <div className="flex items-center justify-center py-8">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading faculty profile...</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Filters Panel */}
+            <div className="bg-white rounded-lg shadow-md p-6 mb-8 border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Report Filters</h3>
+            {facultyProfile && (
+              <div className="text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
+                ✓ Pre-filled with your assigned class
+              </div>
+            )}
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            {/* Class Selection */}
+            {/* Batch */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Class
+                Batch *
+              </label>
+              <input
+                type="text"
+                value={filters.batch}
+                onChange={(e) => handleFilterChange('batch', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="2021-2025"
+                required
+              />
+            </div>
+
+            {/* Year */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Year *
               </label>
               <select
-                value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
+                value={filters.year}
+                onChange={(e) => handleFilterChange('year', e.target.value)}
                 className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               >
-                <option value="">Select Class</option>
-                {classOptions.map(cls => (
-                  <option key={cls} value={cls}>{cls}</option>
+                <option value="">Select Year</option>
+                <option value="1st Year">1st Year</option>
+                <option value="2nd Year">2nd Year</option>
+                <option value="3rd Year">3rd Year</option>
+                <option value="4th Year">4th Year</option>
+              </select>
+            </div>
+
+            {/* Semester */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Semester *
+              </label>
+              <select
+                value={filters.semester}
+                onChange={(e) => handleFilterChange('semester', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                <option value="">Select Semester</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(sem => (
+                  <option key={sem} value={sem}>{sem}</option>
                 ))}
               </select>
             </div>
 
-            {/* Report Type */}
+            {/* Section */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Report Type
+                Section
               </label>
               <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
+                value={filters.section}
+                onChange={(e) => handleFilterChange('section', e.target.value)}
                 className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="single">Single Date</option>
-                <option value="range">Date Range</option>
+                <option value="">All Sections</option>
+                <option value="A">Section A</option>
+                <option value="B">Section B</option>
+                <option value="C">Section C</option>
               </select>
+            </div>
+          </div>
+
+          {/* Report Type */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Report Type
+            </label>
+            <div className="flex space-x-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="single"
+                  checked={filters.reportType === 'single'}
+                  onChange={(e) => handleFilterChange('reportType', e.target.value)}
+                  className="mr-2"
+                />
+                Single Date
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="range"
+                  checked={filters.reportType === 'range'}
+                  onChange={(e) => handleFilterChange('reportType', e.target.value)}
+                  className="mr-2"
+                />
+                Date Range
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="cumulative"
+                  checked={filters.reportType === 'cumulative'}
+                  onChange={(e) => handleFilterChange('reportType', e.target.value)}
+                  className="mr-2"
+                />
+                Cumulative
+              </label>
+            </div>
             </div>
 
             {/* Date Selection */}
-            {reportType === 'single' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {filters.reportType === 'single' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Date
+                  Date
                 </label>
                 <input
                   type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
+                  value={filters.date}
+                  onChange={(e) => handleFilterChange('date', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
-            ) : (
+            )}
+            {filters.reportType === 'range' && (
               <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -375,8 +504,8 @@ const ReportGeneration = () => {
                   </label>
                   <input
                     type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    value={filters.startDate}
+                    onChange={(e) => handleFilterChange('startDate', e.target.value)}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
@@ -387,8 +516,8 @@ const ReportGeneration = () => {
                   </label>
                   <input
                     type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
+                    value={filters.endDate}
+                    onChange={(e) => handleFilterChange('endDate', e.target.value)}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
@@ -401,10 +530,10 @@ const ReportGeneration = () => {
           <div className="flex justify-center">
             <button
               onClick={handleGenerateReport}
-              disabled={loading || !selectedClass}
+              disabled={loading || !filters.batch || !filters.year || !filters.semester}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
             >
-              {loading ? 'Generating...' : 'Generate Report'}
+              {loading ? 'Generating...' : 'Generate Enhanced Report'}
             </button>
           </div>
 
@@ -416,64 +545,46 @@ const ReportGeneration = () => {
         </div>
 
         {/* Report Results */}
-        {reportData && (
+        {reportData && reportData.reportData && reportData.reportData.length > 0 ? (
           <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
             <div className="flex justify-between items-center mb-6">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">
-                  Absentees Report – {reportData?.class || 'Unknown Class'}
+                  Enhanced Absentees Report
                 </h3>
                 <p className="text-gray-600 text-sm">
-                  {reportData?.dateRange?.date 
-                    ? `Date: ${reportData.dateRange.date}`
-                    : `Date Range: ${reportData?.dateRange?.startDate || 'N/A'} to ${reportData?.dateRange?.endDate || 'N/A'}`
-                  }
+                  Class: {reportData.classInfo.batch}, {reportData.classInfo.year}, Sem {reportData.classInfo.semester}
+                  {reportData.classInfo.section !== 'All Sections' && `, Section ${reportData.classInfo.section}`}
                 </p>
                 <p className="text-gray-600 text-sm">
-                  Total Absentees: {reportData?.totalAbsentees || 0}
+                  Generated on: {new Date(reportData.generatedAt).toLocaleString()}
                 </p>
-                {reportData?.attendanceMarked && reportData?.totalAttendanceRecords && (
-                  <p className="text-gray-600 text-sm">
-                    Total Records: {reportData.totalAttendanceRecords}
-                  </p>
-                )}
               </div>
 
               {/* Export Buttons */}
-              {reportData?.absentees?.length > 0 && reportData?.attendanceMarked && (
+              {reportData.reportData && reportData.reportData.length > 0 && (
                 <div className="flex space-x-3">
                   <button
-                    onClick={handleDownloadPDF}
+                    onClick={() => exportReport('pdf')}
                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
                   >
-                    📄 Download PDF
+                    📄 Export PDF
                   </button>
                   <button
-                    onClick={handleDownloadExcel}
+                    onClick={() => exportReport('excel')}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
                   >
-                    📊 Download Excel
+                    📊 Export Excel
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Absentees Table */}
-            {!reportData?.absentees || reportData.absentees.length === 0 ? (
+            {/* Report Table */}
+            {!reportData.reportData || reportData.reportData.length === 0 ? (
               <div className="text-center py-8">
-                {!reportData?.attendanceMarked ? (
-                  // Case 3: No attendance marked
-                  <>
-                    <div className="text-yellow-500 text-lg mb-2">⚠️ Attendance not taken</div>
-                    <p className="text-gray-600">Attendance has not been marked for this date.</p>
-                  </>
-                ) : (
-                  // Case 2: All students present
-                  <>
-                    <div className="text-green-500 text-lg mb-2">✅ All students present</div>
-                    <p className="text-gray-600">All students were present on this date.</p>
-                  </>
-                )}
+                <div className="text-yellow-500 text-lg mb-2">⚠️ No absentees found</div>
+                <p className="text-gray-600">{reportData.message || 'No absentees found for the selected period.'}</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -481,19 +592,28 @@ const ReportGeneration = () => {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Roll No
+                        S.No
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Year (Batch/Year/Semester)
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Reg No
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Student Name
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Date
+                        Phone Number
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
+                        Total Absent Days
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Reason
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Action Taken
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
@@ -501,62 +621,80 @@ const ReportGeneration = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {(reportData?.absentees || []).map((absentee) => (
-                      <tr key={absentee?.id || Math.random()} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {absentee?.rollNo || 'N/A'}
+                    {reportData.reportData.map((row) => (
+                      <tr key={row.sNo} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.sNo}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {absentee?.studentName || 'Unknown'}
+                          {row.year}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {absentee?.date || 'N/A'}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.regNo}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                            {absentee?.status || 'Absent'}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.studentName}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.phoneNumber}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            {row.totalAbsentDays}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                          {editingReasonId === absentee?.id ? (
-                            <textarea
-                              value={editReasonValue}
-                              onChange={(e) => setEditReasonValue(e.target.value)}
-                              className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                              rows="2"
-                              placeholder="Enter reason for absence..."
-                              maxLength="500"
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {editingRow === row.sNo ? (
+                            <input
+                              type="text"
+                              value={editData.reason}
+                              onChange={(e) => setEditData(prev => ({ ...prev, reason: e.target.value }))}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                              placeholder="Enter reason"
                             />
                           ) : (
-                            <span className="break-words">
-                              {absentee?.reason || 'No reason provided'}
+                            <span className="max-w-xs truncate block">
+                              {row.reason || 'No reason provided'}
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          {editingReasonId === absentee?.id ? (
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {editingRow === row.sNo ? (
+                            <input
+                              type="text"
+                              value={editData.actionTaken}
+                              onChange={(e) => setEditData(prev => ({ ...prev, actionTaken: e.target.value }))}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                              placeholder="Enter action taken"
+                            />
+                          ) : (
+                            <span className="max-w-xs truncate block">
+                              {row.actionTaken || 'No action taken'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {editingRow === row.sNo ? (
                             <div className="flex space-x-2">
                               <button
-                                onClick={() => handleSaveReason(absentee?.id)}
-                                disabled={reasonLoading}
-                                className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                                onClick={() => handleEditSave(row.studentId)}
+                                className="text-green-600 hover:text-green-900 text-xs"
                               >
-                                {reasonLoading ? 'Saving...' : 'Save'}
+                                Save
                               </button>
                               <button
-                                onClick={handleCancelEdit}
-                                disabled={reasonLoading}
-                                className="text-gray-600 hover:text-gray-900 disabled:opacity-50"
+                                onClick={handleEditCancel}
+                                className="text-gray-600 hover:text-gray-900 text-xs"
                               >
                                 Cancel
                               </button>
                             </div>
                           ) : (
                             <button
-                              onClick={() => handleEditReason(absentee?.id, absentee?.reason)}
-                              className="text-blue-600 hover:text-blue-900"
+                              onClick={() => handleEditStart(row)}
+                              className="text-indigo-600 hover:text-indigo-900 text-xs"
                             >
-                              Edit Reason
+                              Edit
                             </button>
                           )}
                         </td>
@@ -566,7 +704,59 @@ const ReportGeneration = () => {
                 </table>
               </div>
             )}
+
+            {/* Summary */}
+            <div className="bg-gray-50 px-6 py-4 border-t mt-6">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  <span className="font-medium">Total Absentees:</span> {reportData.totalAbsentees} | 
+                  <span className="font-medium ml-2">Total Students:</span> {reportData.totalStudents} |
+                  <span className="font-medium ml-2">Working Days:</span> {reportData.totalWorkingDays || 0}
+                  {reportData.holidays && reportData.holidays.length > 0 && (
+                    <span className="ml-2 text-yellow-600">
+                      🎉 {reportData.holidays.length} Holiday{reportData.holidays.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <div className="text-sm text-gray-600">
+                  Generated by: {reportData.generatedBy}
+                </div>
+              </div>
+            </div>
+
+            {/* Holidays Section */}
+            {reportData.holidays && reportData.holidays.length > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
+                <h4 className="text-sm font-semibold text-yellow-800 mb-2 flex items-center">
+                  <span className="text-lg mr-2">🎉</span>
+                  Holidays in Report Period
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {reportData.holidays.map((holiday, index) => (
+                    <div key={index} className="text-sm text-yellow-700">
+                      <span className="font-medium">{holiday.date}:</span> {holiday.reason}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+        ) : reportData && reportData.reportData && reportData.reportData.length === 0 ? (
+          <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
+            <div className="text-center py-8">
+              <div className="text-gray-500 text-lg mb-2">📊</div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Absentees Found</h3>
+              <p className="text-gray-600">
+                {reportData.message || 'No students were absent for the selected date/class.'}
+              </p>
+              <div className="mt-4 text-sm text-gray-500">
+                <p>Total Students: {reportData.totalStudents || 0}</p>
+                <p>Attendance Status: {reportData.attendanceMarked ? '✅ Marked' : '❌ Not Marked'}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+          </>
         )}
       </main>
     </div>
@@ -574,3 +764,5 @@ const ReportGeneration = () => {
 };
 
 export default ReportGeneration;
+
+  

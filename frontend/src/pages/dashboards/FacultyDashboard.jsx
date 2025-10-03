@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import CreateStudentModal from '../../components/CreateStudentModal';
-import StudentList from '../../components/StudentList';
+import AddStudentModal from '../../components/AddStudentModal';
+import HolidayModal from '../../components/HolidayModal';
+import HolidayManagement from '../../components/HolidayManagement';
 import Toast from '../../components/Toast';
 import { apiFetch } from '../../utils/apiFetch';
 
@@ -10,11 +11,19 @@ const FacultyDashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [assignedClass, setAssignedClass] = useState(null);
-  const [showCreateStudentModal, setShowCreateStudentModal] = useState(false);
+  const [facultyProfile, setFacultyProfile] = useState(null);
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [showHolidayManagement, setShowHolidayManagement] = useState(false);
   const [studentRefreshTrigger, setStudentRefreshTrigger] = useState(0);
+  const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [attendanceForm, setAttendanceForm] = useState({ date: new Date().toISOString().slice(0,10), absentees: '' });
   const [attendanceToast, setAttendanceToast] = useState({ show: false, message: '', type: 'success' });
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [isHoliday, setIsHoliday] = useState(false);
+  const [holidayReason, setHolidayReason] = useState('');
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0,10));
   const [historyRows, setHistoryRows] = useState([]);
   const [totalStudentsCount, setTotalStudentsCount] = useState(0);
@@ -24,75 +33,188 @@ const FacultyDashboard = () => {
     if (!classId) return;
     
     try {
+      // If facultyProfile exists, prefer batch/year/semester
+      if (facultyProfile?.batch && facultyProfile?.year && facultyProfile?.semester) {
       const res = await apiFetch({ 
-        url: `/api/student/list/${classId}?limit=1000` // Use same endpoint as Student Management
+          url: `/api/students?batch=${encodeURIComponent(facultyProfile.batch)}&year=${encodeURIComponent(facultyProfile.year)}&semester=${encodeURIComponent(facultyProfile.semester)}`
       });
-      
-      if (res.data.status === 'success' && res.data.data && Array.isArray(res.data.data.students)) {
+        if (res.data.success && res.data.data && Array.isArray(res.data.data.students)) {
         setTotalStudentsCount(res.data.data.students.length);
-      } else {
-        setTotalStudentsCount(0);
+          return;
+        }
       }
+      setTotalStudentsCount(0);
     } catch (error) {
       console.error('Error fetching student count:', error);
       setTotalStudentsCount(0);
     }
-  }, []);
+  }, [facultyProfile?.batch, facultyProfile?.year, facultyProfile?.semester]);
 
-  // Check if faculty is assigned as class teacher
-  useEffect(() => {
-    // This would typically come from the user's profile or a separate API call
-    // For now, we'll simulate checking if the user has an assigned class
-    const checkAssignedClass = async () => {
-      try {
-        // In a real implementation, you would fetch this from an API
-        // For now, we'll use a mock value or check user properties
-        if (user?.assignedClass && user.assignedClass !== 'None') {
-          setAssignedClass(user.assignedClass);
-        }
-      } catch (error) {
-        console.error('Error checking assigned class:', error);
+  const fetchStudentsForAdvisor = useCallback(async () => {
+    if (!facultyProfile?.batch || !facultyProfile?.year || !facultyProfile?.semester) return;
+    setStudentsLoading(true);
+    try {
+      const url = `/api/students?batch=${encodeURIComponent(facultyProfile.batch)}&year=${encodeURIComponent(facultyProfile.year)}&semester=${encodeURIComponent(facultyProfile.semester)}${facultyProfile.section ? `&section=${encodeURIComponent(facultyProfile.section)}` : ''}`;
+      const res = await apiFetch({ url });
+      if (res.data?.success) {
+        const list = res.data.data?.students || [];
+        // normalize to view model
+        setStudents(list.map(s => ({
+          id: s.id,
+          rollNumber: s.roll_number,
+          name: s.full_name,
+          email: s.email,
+          mobile: s.mobile_number
+        })));
+        setTotalStudentsCount(list.length);
+      } else {
+        setStudents([]);
+        setToast({ show: true, message: res.data?.message || 'Failed to load students', type: 'error' });
       }
-    };
+    } catch (e) {
+      setStudents([]);
+      setToast({ show: true, message: e?.response?.data?.message || 'Failed to load students', type: 'error' });
+    } finally {
+      setStudentsLoading(false);
+    }
+  }, [facultyProfile?.batch, facultyProfile?.year, facultyProfile?.semester, facultyProfile?.section]);
 
-    checkAssignedClass();
-  }, [user]);
+  // Fetch faculty profile including advisor details
+  const fetchFacultyProfile = useCallback(async () => {
+    if (!user?.id) return;
+    
+    try {
+      const response = await fetch(`/api/faculty/profile/${user.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setFacultyProfile(data.data);
+          
+          // Set assigned class from profile or legacy field
+          if (data.data.assignedClass && data.data.assignedClass !== 'None') {
+            setAssignedClass(data.data.assignedClass);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching faculty profile:', error);
+      // Fallback to legacy assigned class check
+      if (user?.assignedClass && user.assignedClass !== 'None') {
+        setAssignedClass(user.assignedClass);
+      }
+    }
+  }, [user?.id, user?.assignedClass]);
+
+  // Check if faculty is assigned as class teacher and fetch profile
+  useEffect(() => {
+    fetchFacultyProfile();
+  }, [fetchFacultyProfile]);
+
+  // Check holiday status on mount and when date changes
+  useEffect(() => {
+    if (attendanceForm.date) {
+      checkHolidayStatus(attendanceForm.date);
+    }
+  }, [attendanceForm.date]);
 
   // Fetch student count when assigned class changes
   useEffect(() => {
     if (assignedClass) {
       fetchStudentCount(assignedClass);
     }
-  }, [assignedClass, studentRefreshTrigger, fetchStudentCount]);
+    fetchStudentsForAdvisor();
+  }, [assignedClass, studentRefreshTrigger, fetchStudentCount, fetchStudentsForAdvisor]);
 
   const handleAttendanceChange = (e) => {
     const { name, value } = e.target;
     setAttendanceForm(prev => ({ ...prev, [name]: value }));
+    
+    // Check holiday status when date changes
+    if (name === 'date') {
+      checkHolidayStatus(value);
+    }
+  };
+
+  const checkHolidayStatus = async (date) => {
+    try {
+      const holidayCheck = await apiFetch({
+        url: `/api/holidays/check/${date}`,
+        method: 'GET'
+      });
+      
+      if (holidayCheck.data?.data?.isHoliday) {
+        setIsHoliday(true);
+        setHolidayReason(holidayCheck.data.data.holiday.reason);
+      } else {
+        setIsHoliday(false);
+        setHolidayReason('');
+      }
+    } catch (error) {
+      console.error('Error checking holiday status:', error);
+      setIsHoliday(false);
+      setHolidayReason('');
+    }
   };
 
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
-    if (!assignedClass) return;
+    if (!facultyProfile?.batch || !facultyProfile?.year || !facultyProfile?.semester) return;
+    
+    // Check if the selected date is a holiday
+    try {
+      const holidayCheck = await apiFetch({
+        url: `/api/holidays/check/${attendanceForm.date}`,
+        method: 'GET'
+      });
+      
+      if (holidayCheck.data?.data?.isHoliday) {
+        setAttendanceToast({
+          show: true,
+          message: `❌ Cannot mark attendance on ${attendanceForm.date}. This date is marked as a holiday: ${holidayCheck.data.data.holiday.reason}`,
+          type: 'error'
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking holiday status:', error);
+      // Continue with attendance marking if holiday check fails
+    }
+    
     setAttendanceLoading(true);
     try {
-      // Parse roll numbers as integers
+      // Parse roll numbers as strings to preserve leading zeros if any
       const absentRollNumbers = attendanceForm.absentees
         .split(',')
-        .map(num => parseInt(num.trim()))
-        .filter(num => !isNaN(num));
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
       
       const res = await apiFetch({
-        url: '/api/attendance/mark',
+        url: '/api/attendance/mark-students',
         method: 'POST',
         data: { 
-          classId: assignedClass, 
+          batch: facultyProfile.batch,
+          year: facultyProfile.year,
+          semester: facultyProfile.semester,
+          section: facultyProfile.section,
           date: attendanceForm.date, 
-          absentRollNumbers: absentRollNumbers 
+          absentRollNumbers
         }
       });
       const data = res.data;
       if (data.status === 'success') {
-        setAttendanceToast({ show: true, message: data.message || `Attendance marked successfully for ${assignedClass} on ${attendanceForm.date}.`, type: 'success' });
+        const classInfo = `${facultyProfile.batch} | ${facultyProfile.year} | Semester ${facultyProfile.semester}${facultyProfile.section ? ` | Section ${facultyProfile.section}` : ''}`;
+        setAttendanceToast({ 
+          show: true, 
+          message: `✅ Attendance marked successfully for ${classInfo} on ${attendanceForm.date}. ${data.data?.absentStudents || 0} students marked absent.`, 
+          type: 'success' 
+        });
+        // Clear the absentees field after successful marking
+        setAttendanceForm(prev => ({ ...prev, absentees: '' }));
       } else {
         throw new Error(data.message || 'Error saving attendance');
       }
@@ -116,6 +238,14 @@ const FacultyDashboard = () => {
                 <h1 className="text-2xl font-bold text-gray-900">Faculty Dashboard</h1>
                 <p className="text-gray-600">Welcome back, {user?.name}</p>
                 <p className="text-sm text-blue-600">Department: {user?.department}</p>
+                {facultyProfile && facultyProfile.is_class_advisor && (
+                  <p className="text-sm text-green-600 font-medium">
+                    ✅ Class Advisor for Batch {facultyProfile.batch}, {facultyProfile.year}, Semester {facultyProfile.semester}
+                  </p>
+                )}
+                {facultyProfile && facultyProfile.position && (
+                  <p className="text-sm text-gray-500">Position: {facultyProfile.position}</p>
+                )}
               </div>
             </div>
             <button
@@ -149,45 +279,99 @@ const FacultyDashboard = () => {
         {assignedClass && (
           <div className="mb-8 bg-white rounded-lg shadow-md p-6">
             <h3 className="text-lg font-semibold mb-4">Attendance - {assignedClass}</h3>
-            <form onSubmit={handleMarkAttendance} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <form onSubmit={handleMarkAttendance} className="space-y-4">
+              {/* Class and Date Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
-                <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
-              </div>
-                <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
-                <input type="date" name="date" value={attendanceForm.date} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                  <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
                 </div>
-              <div className="md:col-span-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <input 
+                        type="date" 
+                        name="date" 
+                        value={attendanceForm.date} 
+                        disabled 
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-100 ${isHoliday ? 'border-amber-300 bg-amber-50' : ''}`}
+                      />
+                      {isHoliday && (
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                          <span className="text-amber-500 text-sm">🎉</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowHolidayModal(true)}
+                        className="px-3 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center text-sm font-medium"
+                        title="Mark this date as holiday"
+                      >
+                        <span className="text-sm mr-1">🎉</span>
+                        Holiday
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowHolidayManagement(true)}
+                        className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center text-sm font-medium"
+                        title="Manage all holidays"
+                      >
+                        <span className="text-sm mr-1">⚙️</span>
+                        Manage
+                      </button>
+                    </div>
+                  </div>
+                  {isHoliday && (
+                    <p className="mt-1 text-sm text-amber-600 flex items-center">
+                      <span className="mr-1">🎉</span>
+                      This date is marked as a holiday: {holidayReason}
+                    </p>
+                  )}
+                </div>
+              </div>
+              
+              {/* Absent Roll Numbers Row */}
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Absent Roll Numbers (comma-separated)</label>
                 <input type="text" name="absentees" value={attendanceForm.absentees} onChange={handleAttendanceChange} placeholder="e.g., 44, 7" className="w-full px-3 py-2 border rounded-lg" />
               </div>
               <div className="flex gap-2">
-                <button type="submit" disabled={attendanceLoading} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">
-                  {attendanceLoading ? 'Saving...' : 'Mark Attendance'}
+                <button type="submit" disabled={attendanceLoading || isHoliday} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {attendanceLoading ? 'Saving...' : isHoliday ? 'Cannot mark attendance on holiday' : 'Mark Attendance'}
             </button>
                 <button type="button" onClick={async () => {
                   setAttendanceLoading(true);
                   try {
-                    // Parse roll numbers as integers
+                    // Parse roll numbers as strings to preserve leading zeros if any
                     const absentRollNumbers = attendanceForm.absentees
                       .split(',')
-                      .map(num => parseInt(num.trim()))
-                      .filter(num => !isNaN(num));
+                      .map(t => t.trim())
+                      .filter(t => t.length > 0);
                     
                     const today = new Date().toISOString().slice(0,10);
                     const res = await apiFetch({ 
-                      url: '/api/attendance/edit', 
+                      url: '/api/attendance/edit-students', 
                       method: 'PUT', 
                       data: { 
-                        classId: assignedClass, 
+                        batch: facultyProfile.batch,
+                        year: facultyProfile.year,
+                        semester: facultyProfile.semester,
+                        section: facultyProfile.section,
                         date: today,
-                        absentRollNumbers: absentRollNumbers 
+                        absentRollNumbers
                       } 
                     });
                     const data = res.data;
                     if (data.status === 'success') {
-                      setAttendanceToast({ show: true, message: data.message || `Today's attendance updated for ${assignedClass}.`, type: 'success' });
+                      const classInfo = `${facultyProfile.batch} | ${facultyProfile.year} | Semester ${facultyProfile.semester}${facultyProfile.section ? ` | Section ${facultyProfile.section}` : ''}`;
+                      setAttendanceToast({ 
+                        show: true, 
+                        message: `✅ Today's attendance updated for ${classInfo}. ${data.data?.absentStudents || 0} students marked absent.`, 
+                        type: 'success' 
+                      });
                     } else {
                       throw new Error(data.message || 'Failed to update attendance');
                     }
@@ -197,7 +381,7 @@ const FacultyDashboard = () => {
                   } finally {
                     setAttendanceLoading(false);
                   }
-                }} disabled={attendanceLoading} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">Edit Today's Attendance</button>
+                }} disabled={attendanceLoading || isHoliday} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isHoliday ? 'Cannot edit on holiday' : 'Edit Today\'s Attendance'}</button>
                 </div>
             </form>
               </div>
@@ -207,57 +391,100 @@ const FacultyDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <span className="text-3xl mr-3">🎒</span>
-              <div>
+              <div className="flex items-center">
+                <span className="text-3xl mr-3">🎒</span>
+                <div>
                   <p className="text-sm text-gray-600">Total Students in {assignedClass}</p>
                   <p className="text-2xl font-bold text-gray-900">{totalStudentsCount}</p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-          {assignedClass && (
-          <div className="bg-white rounded-lg shadow-md p-6">
+          {/* Class Management Card - Only show if faculty is class advisor */}
+          {facultyProfile && facultyProfile.is_class_advisor && (
+            <div className="bg-white rounded-lg shadow-md p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <span className="text-3xl mr-3">👥</span>
-                <div>
+                  <span className="text-3xl mr-3">📚</span>
+                  <div>
                     <p className="text-sm text-gray-600">Class Management</p>
-                    <p className="text-sm text-gray-500">View & manage students</p>
+                    <p className="text-lg font-semibold text-gray-900">Manage Students by Batch</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Assigned Class: <span className="font-medium text-indigo-600">
+                        {facultyProfile.assignedClass || `${facultyProfile.batch}, ${facultyProfile.year}, Sem ${facultyProfile.semester}`}
+                      </span>
+                    </p>
+                  </div>
                 </div>
-              </div>
                 <button
-                  onClick={() => navigate(`/class-management/${assignedClass}`)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  onClick={() => {
+                    // Redirect directly to student management for assigned class
+                    if (facultyProfile.batch && facultyProfile.year && facultyProfile.semester && facultyProfile.department) {
+                      navigate('/student-management', {
+                        state: {
+                          batch: facultyProfile.batch,
+                          year: facultyProfile.year,
+                          semester: facultyProfile.semester,
+                          department: facultyProfile.department,
+                          classTitle: `${facultyProfile.batch} | ${facultyProfile.year} | Semester ${facultyProfile.semester}`
+                        }
+                      });
+                    } else {
+                      // Fallback to class selection if data is incomplete
+                      navigate('/class-selection');
+                    }
+                  }}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
                 >
-                  Manage Class
+                  Manage Classes
                 </button>
               </div>
             </div>
           )}
 
-          {/* Report Generation Card */}
-          {assignedClass && (
+          {/* Non-advisor message */}
+          {facultyProfile && !facultyProfile.is_class_advisor && (
             <div className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <span className="text-3xl mr-3">📝</span>
-                  <div>
+              <div className="flex items-center">
+                <span className="text-3xl mr-3">📚</span>
+                <div>
+                  <p className="text-sm text-gray-600">Class Management</p>
+                  <p className="text-lg font-semibold text-gray-900">Not Assigned as Class Advisor</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    You are not assigned as a class advisor. Please contact your HOD or Admin.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Report Generation Card */}
+        {assignedClass && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="text-3xl mr-3">📝</span>
+                <div>
                     <p className="text-sm text-gray-600">Report Generation</p>
-                    <p className="text-sm text-gray-500">Generate absentees reports</p>
+                    <p className="text-sm text-gray-500">Generate detailed absentees reports with cumulative data</p>
                   </div>
                 </div>
                 <button
-                  onClick={() => navigate('/report-generation')}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  onClick={() => navigate('/report-generation', { 
+                    state: { 
+                      facultyProfile: facultyProfile 
+                    } 
+                  })}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
                 >
                   Generate Report
                 </button>
               </div>
             </div>
           )}
-          </div>
+
         {/* Attendance History */}
         {assignedClass && (
           <div className="mb-8 bg-white rounded-lg shadow-md p-6">
@@ -274,9 +501,8 @@ const FacultyDashboard = () => {
                 <div>
                 <button type="button" onClick={async () => {
                   try {
-                    const res = await apiFetch({ 
-                      url: `/api/attendance/history?classId=${encodeURIComponent(assignedClass)}&date=${encodeURIComponent(historyDate)}` 
-                    });
+                    const url = `/api/attendance/history-by-class?batch=${encodeURIComponent(facultyProfile.batch)}&year=${encodeURIComponent(facultyProfile.year)}&semester=${encodeURIComponent(facultyProfile.semester)}&date=${encodeURIComponent(historyDate)}${facultyProfile.section ? `&section=${encodeURIComponent(facultyProfile.section)}` : ''}`;
+                    const res = await apiFetch({ url });
                     const data = res.data;
                     if (data.status === 'success') {
                       setHistoryRows(data.data?.records || []);
@@ -327,35 +553,124 @@ const FacultyDashboard = () => {
                 Student Management
               </h2>
               <button
-                onClick={() => setShowCreateStudentModal(true)}
+                onClick={() => setShowAddStudentModal(true)}
                 className="w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors min-h-[44px]"
               >
                 Add Student
               </button>
             </div>
             
-            <StudentList 
-              assignedClass={assignedClass}
-              refreshTrigger={studentRefreshTrigger}
-            />
+            <div className="bg-white rounded-lg shadow-md overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Roll Number</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mobile Number</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {studentsLoading ? (
+                      <tr><td colSpan="5" className="px-6 py-4 text-sm text-gray-500">Loading...</td></tr>
+                    ) : students.length === 0 ? (
+                      <tr><td colSpan="5" className="px-6 py-4 text-sm text-gray-500">No students found.</td></tr>
+                    ) : (
+                      students.map(s => (
+                        <tr key={s.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{s.rollNumber}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <button
+                              onClick={() => navigate(`/student-profile/${s.id}`)}
+                              className="text-indigo-600 hover:text-indigo-900 hover:underline font-medium"
+                            >
+                              {s.name}
+                            </button>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{s.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{s.mobile || 'N/A'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button onClick={async () => {
+                              if (!window.confirm('Delete this student?')) return;
+                              try {
+                                const res = await apiFetch({ url: `/api/students/${s.id}`, method: 'DELETE' });
+                                if (res.data?.success) {
+                                  setStudents(prev => prev.filter(x => x.id !== s.id));
+                                  setTotalStudentsCount(prev => Math.max(0, prev - 1));
+                                  setToast({ show: true, message: 'Student deleted successfully', type: 'success' });
+                                } else {
+                                  setToast({ show: true, message: res.data?.message || 'Failed to delete student', type: 'error' });
+                                }
+                              } catch (e) {
+                                setToast({ show: true, message: e?.response?.data?.message || 'Failed to delete student', type: 'error' });
+                              }
+                            }} className="text-red-600 hover:text-red-900">Delete</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </main>
 
       {/* Create Student Modal */}
-      <CreateStudentModal
-        isOpen={showCreateStudentModal}
-        onClose={() => setShowCreateStudentModal(false)}
-        onStudentCreated={() => setStudentRefreshTrigger(prev => prev + 1)}
-        assignedClass={assignedClass}
+      {showAddStudentModal && facultyProfile && (
+        <AddStudentModal
+          isOpen={showAddStudentModal}
+          onClose={() => setShowAddStudentModal(false)}
+          onStudentCreated={() => {
+            setShowAddStudentModal(false);
+            setStudentRefreshTrigger(prev => prev + 1);
+            setToast({ show: true, message: 'Student added successfully', type: 'success' });
+            fetchStudentsForAdvisor();
+          }}
+          batchInfo={{
+            batch: facultyProfile.batch,
+            year: facultyProfile.year,
+            semester: facultyProfile.semester,
+            department: facultyProfile.department,
+            section: facultyProfile.section
+          }}
+        />
+      )}
+
+      {/* Holiday Modal */}
+      <HolidayModal
+        isOpen={showHolidayModal}
+        onClose={() => setShowHolidayModal(false)}
+        selectedDate={attendanceForm.date}
+        onSuccess={(holidayData) => {
+          setToast({
+            show: true,
+            message: `Holiday marked successfully for ${holidayData.date}`,
+            type: 'success'
+          });
+          // Refresh holiday status for current date
+          checkHolidayStatus(attendanceForm.date);
+        }}
+      />
+
+      {/* Holiday Management Modal */}
+      <HolidayManagement
+        isOpen={showHolidayManagement}
+        onClose={() => setShowHolidayManagement(false)}
       />
 
       {/* Toast Notifications */}
-      {attendanceToast.show && (
+      {(attendanceToast.show || toast.show) && (
         <Toast
-          message={attendanceToast.message}
-          type={attendanceToast.type}
-          onClose={() => setAttendanceToast({ show: false, message: '', type: 'success' })}
+          message={attendanceToast.show ? attendanceToast.message : toast.message}
+          type={attendanceToast.show ? attendanceToast.type : toast.type}
+          onClose={() => {
+            if (attendanceToast.show) setAttendanceToast({ show: false, message: '', type: 'success' });
+            if (toast.show) setToast({ show: false, message: '', type: 'success' });
+          }}
         />
       )}
     </div>

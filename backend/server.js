@@ -8,13 +8,32 @@ import attendanceRoutes from './routes/attendance.js';
 import facultyRoutes from './routes/faculty.js';
 import studentRoutes from './routes/student.js';
 import reportRoutes from './routes/report.js';
+import holidayRoutes from './routes/holiday.js';
 import config from './config/config.js';
+import Student from './models/Student.js';
+import Attendance from './models/Attendance.js';
+import Holiday from './models/Holiday.js';
 
 // Load environment variables
 dotenv.config();
 
 // Connect to database
 connectDB();
+
+// Ensure indexes are in sync with schema (drops obsolete indexes like rollNumber_1)
+try {
+  Student.syncIndexes()
+    .then(() => console.log('✅ Student indexes synced'))
+    .catch(err => console.error('⚠️  Student index sync error:', err?.message || err));
+  Attendance.syncIndexes()
+    .then(() => console.log('✅ Attendance indexes synced'))
+    .catch(err => console.error('⚠️  Attendance index sync error:', err?.message || err));
+  Holiday.syncIndexes()
+    .then(() => console.log('✅ Holiday indexes synced'))
+    .catch(err => console.error('⚠️  Holiday index sync error:', err?.message || err));
+} catch (e) {
+  console.error('⚠️  Index sync init error:', e?.message || e);
+}
 
 const app = express();
 const PORT = config.PORT;
@@ -42,6 +61,7 @@ app.use('/api/student', studentRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/classes', studentRoutes);
 app.use('/api/report', reportRoutes);
+app.use('/api/holidays', holidayRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

@@ -29,6 +29,43 @@ const StudentDashboard = () => {
     fetchAttendance();
   }, [user]);
 
+  // Real-time updates via SSE
+  useEffect(() => {
+    if (!user?.id || !localStorage.getItem('accessToken')) return;
+    const token = localStorage.getItem('accessToken');
+    const url = `/api/attendance/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+
+    const onAttendance = (ev) => {
+      try {
+        const payload = JSON.parse(ev.data);
+        if (!payload?.date || !payload?.status) return;
+        setHistory(prev => {
+          const idx = prev.findIndex(r => r.date === payload.date);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], status: payload.status };
+            return next;
+          }
+          return [{ date: payload.date, status: payload.status }, ...prev];
+        });
+        const today = new Date().toISOString().slice(0,10);
+        if (payload.date === today) setTodayStatus(payload.status);
+      } catch (_) {}
+    };
+
+    es.addEventListener('attendance', onAttendance);
+
+    es.onerror = () => {
+      try { es.close(); } catch (_) {}
+    };
+
+    return () => {
+      try { es.removeEventListener('attendance', onAttendance); } catch (_) {}
+      try { es.close(); } catch (_) {}
+    };
+  }, [user?.id]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}

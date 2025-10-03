@@ -12,6 +12,300 @@ const router = express.Router();
 router.use(authenticate);
 router.use(facultyAndAbove);
 
+// Helper: normalize year and semester inputs to stored format
+const normalizeYear = (yearInput) => {
+  if (!yearInput) return undefined;
+  const asString = String(yearInput).trim();
+  if (/^\d+$/.test(asString)) {
+    const n = parseInt(asString, 10);
+    if (n === 1) return '1st Year';
+    if (n === 2) return '2nd Year';
+    if (n === 3) return '3rd Year';
+    if (n === 4) return '4th Year';
+  }
+  if (/^\d(st|nd|rd|th)\s*Year$/i.test(asString)) return asString.replace(/\s+/g, ' ');
+  if (['1st', '2nd', '3rd', '4th'].includes(asString)) {
+    return `${asString} Year`;
+  }
+  return asString; // fallback
+};
+
+const normalizeSemester = (semInput) => {
+  if (!semInput && semInput !== 0) return undefined;
+  const asString = String(semInput).trim();
+  if (/^\d+$/.test(asString)) {
+    return `Sem ${parseInt(asString, 10)}`;
+  }
+  if (/^Sem\s*\d$/i.test(asString)) {
+    const n = asString.match(/\d+/)?.[0];
+    return `Sem ${n}`;
+  }
+  return asString; // fallback
+};
+
+const parseYearNumber = (normalizedYear) => {
+  if (!normalizedYear) return undefined;
+  const m = String(normalizedYear).match(/^(\d)(st|nd|rd|th)\s*Year$/i);
+  if (m) return parseInt(m[1], 10);
+  if (/^\d+$/.test(String(normalizedYear))) return parseInt(normalizedYear, 10);
+  return undefined;
+};
+
+const parseSemesterNumber = (normalizedSemester) => {
+  if (!normalizedSemester) return undefined;
+  const m = String(normalizedSemester).match(/(\d+)/);
+  if (m) return parseInt(m[1], 10);
+  return undefined;
+};
+
+// @desc    Fetch students for assigned class (by batch/year/semester[/section])
+// @route   GET /api/students?batch=YYYY-YYYY&year=2nd%20Year|1&semester=3|Sem%203[&section=A]
+// @access  Faculty (Class Advisor) and above
+router.get('/', async (req, res) => {
+  try {
+    const { batch, year, semester, section } = req.query;
+    if (!batch || !year || !semester) {
+      return res.status(400).json({
+        success: false,
+        message: 'batch, year, and semester are required'
+      });
+    }
+
+    const normalizedYear = normalizeYear(year);
+    const normalizedSemester = normalizeSemester(semester);
+
+    // Verify faculty is class advisor for this class
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+      is_class_advisor: true,
+      batch,
+      year: normalizedYear,
+      semester: parseInt(String(semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      ...(section ? { section } : {}),
+      department: req.user.department,
+      status: 'active'
+    });
+
+    if (!faculty) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to view students for this class'
+      });
+    }
+
+    const students = await Student.find({
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: req.user.department,
+      status: 'active'
+    })
+      .select('userId rollNumber name email mobile year semester batch department')
+      .sort({ rollNumber: 1 });
+
+    // Map to expected response shape
+    const yearNumber = parseYearNumber(normalizedYear);
+    const semesterNumber = parseSemesterNumber(normalizedSemester);
+    const data = students.map(s => ({
+      id: s.userId, // Use userId (User ID) instead of Student document ID
+      roll_number: s.rollNumber,
+      full_name: s.name,
+      email: s.email,
+      mobile_number: s.mobile || '',
+      department: s.department,
+      batch: s.batch,
+      year: yearNumber,
+      semester: semesterNumber,
+      section: faculty?.section || undefined
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        students: data,
+        total: data.length
+      }
+    });
+  } catch (error) {
+    console.error('GET /api/students error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @desc    Create new student
+// @route   POST /api/students
+// @access  Faculty (Class Advisor) and above
+router.post('/', [
+  body('roll_number').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
+  body('rollNumber').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
+  body('rollNo').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
+  body('full_name').optional().isString().trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  body('name').optional().isString().trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
+  body('mobile_number').optional().matches(/^[0-9]{10}$/).withMessage('Mobile number must be 10 digits'),
+  body('mobile').optional().matches(/^[0-9]{10}$/).withMessage('Mobile number must be 10 digits'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
+  body('year').exists().withMessage('Year is required'),
+  body('semester').exists().withMessage('Semester is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
+    }
+
+    const bodyData = req.body;
+    const rollNumber = (bodyData.roll_number || bodyData.rollNumber || bodyData.rollNo || '').trim();
+    const name = (bodyData.full_name || bodyData.name || '').trim();
+    const email = String(bodyData.email).toLowerCase().trim();
+    const mobile = (bodyData.mobile_number || bodyData.mobile || '').trim();
+    const password = String(bodyData.password);
+    const batch = String(bodyData.batch).trim();
+    const normalizedYear = normalizeYear(bodyData.year);
+    const normalizedSemester = normalizeSemester(bodyData.semester);
+
+    if (!rollNumber) {
+      return res.status(400).json({ success: false, message: 'Missing roll_number' });
+    }
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Missing full_name' });
+    }
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Missing email' });
+    }
+    if (!password) {
+      return res.status(400).json({ success: false, message: 'Missing password' });
+    }
+
+    // Verify authorization: must be class advisor for this batch/year/semester
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+      is_class_advisor: true,
+      batch,
+      year: normalizedYear,
+      semester: parseInt(String(bodyData.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      department: req.user.department,
+      status: 'active'
+    });
+
+    if (!faculty) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to create students for this class' });
+    }
+
+    // Check email uniqueness across users
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'Email already in use' });
+    }
+
+    // Check roll number uniqueness within batch
+    const existingStudent = await Student.findOne({ rollNumber, batch });
+    if (existingStudent) {
+      return res.status(400).json({ success: false, message: 'Roll number already exists in this batch' });
+    }
+
+    // Optional: ensure mobile uniqueness among students
+    if (mobile) {
+      const existingMobile = await Student.findOne({ mobile });
+      if (existingMobile) {
+        return res.status(400).json({ success: false, message: 'Mobile number already in use' });
+      }
+    }
+
+    // Build class string for User schema (required for students)
+    const userClassString = `${batch}, ${normalizedYear}, ${normalizedSemester}`;
+
+    // Create User account (password hashed by pre-save hook)
+    const user = new User({
+      name,
+      email,
+      password,
+      role: 'student',
+      department: req.user.department,
+      class: userClassString,
+      createdBy: req.user._id
+    });
+    await user.save();
+
+    // Create Student profile
+    const student = new Student({
+      userId: user._id,
+      rollNumber,
+      name,
+      email,
+      mobile,
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      classAssigned: '1A', // legacy field required by schema; not used in this flow
+      facultyId: faculty._id,
+      department: req.user.department,
+      createdBy: req.user._id
+    });
+    await student.save();
+
+    const yearNumber = parseYearNumber(normalizedYear);
+    const semesterNumber = parseSemesterNumber(normalizedSemester);
+    const response = {
+      id: student._id,
+      roll_number: student.rollNumber,
+      full_name: student.name,
+      email: student.email,
+      mobile_number: student.mobile || '',
+      department: student.department,
+      batch: student.batch,
+      year: yearNumber,
+      semester: semesterNumber
+    };
+
+    return res.status(201).json({ success: true, message: 'Student created successfully', data: response });
+  } catch (error) {
+    console.error('POST /api/students error:', error);
+    if (error?.code === 11000) {
+      return res.status(400).json({ success: false, message: 'Duplicate entry' });
+    }
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @desc    Delete student (removes from both Users & Students)
+// @route   DELETE /api/students/:id
+// @access  Faculty (Class Advisor) and above
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    // Verify faculty is authorized for this student's class
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+      is_class_advisor: true,
+      batch: student.batch,
+      year: student.year,
+      department: req.user.department,
+      status: 'active'
+    });
+
+    if (!faculty) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to delete this student' });
+    }
+
+    // Delete linked user
+    await User.findByIdAndDelete(student.userId);
+    // Delete student
+    await Student.findByIdAndDelete(id);
+
+    return res.status(200).json({ success: true, message: 'Student deleted successfully' });
+  } catch (error) {
+    console.error('DELETE /api/students/:id error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // @desc    Create new student
 // @route   POST /api/student/create
 // @route   POST /api/students/add (alias)
@@ -626,6 +920,156 @@ router.get('/:id/attendance', authenticate, async (req, res) => {
       status: 'error',
       message: 'Server error'
     });
+  }
+});
+
+// @desc    Get student profile with detailed attendance data
+// @route   GET /api/students/:id/profile
+// @access  Faculty and above, or student accessing their own data
+router.get('/:id/profile', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    const currentUser = req.user;
+
+    console.log('👤 Fetching student profile for ID:', id);
+
+    // Authorization: students can only access their own data, faculty+ can access any
+    if (currentUser.role === 'student' && currentUser._id.toString() !== id) {
+      return res.status(403).json({ status: 'error', message: 'Access denied' });
+    }
+
+    // Get student basic info
+    const student = await Student.findOne({ userId: id })
+      .populate('userId', 'name email mobile')
+      .populate('facultyId', 'name');
+
+    console.log('👤 Student found:', student ? 'Yes' : 'No');
+
+    if (!student) {
+      console.log('❌ Student not found for userId:', id);
+      return res.status(404).json({ status: 'error', message: 'Student not found' });
+    }
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { $gte: start, $lte: end };
+    } else {
+      // Default to current academic year if no date range provided
+      const currentYear = new Date().getFullYear();
+      const academicYearStart = new Date(currentYear, 7, 1); // August 1st
+      const academicYearEnd = new Date(currentYear + 1, 6, 31); // July 31st next year
+      dateFilter = { $gte: academicYearStart, $lte: academicYearEnd };
+    }
+
+    // Get attendance records for the student
+    const attendanceRecords = await Attendance.find({
+      studentId: id,
+      date: dateFilter
+    }).sort({ date: 1 });
+
+    // Get holidays in the same date range to exclude from working days
+    const Holiday = (await import('../models/Holiday.js')).default;
+    const holidays = await Holiday.find({
+      department: student.department,
+      holidayDate: dateFilter,
+      isActive: true
+    }).select('holidayDate reason');
+
+    // Create a set of holiday dates for quick lookup
+    const holidayDates = new Set(holidays.map(h => h.holidayDate.toISOString().split('T')[0]));
+
+    // Calculate attendance statistics (excluding holidays)
+    const workingDaysRecords = attendanceRecords.filter(record => {
+      const recordDate = record.date.toISOString().split('T')[0];
+      return !holidayDates.has(recordDate);
+    });
+
+    const totalDays = workingDaysRecords.length;
+    const presentDays = workingDaysRecords.filter(record => record.status === 'Present').length;
+    const absentDays = workingDaysRecords.filter(record => record.status === 'Absent').length;
+    const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+    // Group attendance by month for calendar view (including holidays)
+    const monthlyAttendance = {};
+    
+    // Add attendance records
+    attendanceRecords.forEach(record => {
+      const monthKey = record.date.toISOString().slice(0, 7); // YYYY-MM format
+      if (!monthlyAttendance[monthKey]) {
+        monthlyAttendance[monthKey] = [];
+      }
+      monthlyAttendance[monthKey].push({
+        date: record.date.toISOString().split('T')[0],
+        status: record.status,
+        reason: record.reason || '',
+        actionTaken: record.actionTaken || ''
+      });
+    });
+
+    // Add holidays to monthly attendance
+    holidays.forEach(holiday => {
+      const monthKey = holiday.holidayDate.toISOString().slice(0, 7);
+      if (!monthlyAttendance[monthKey]) {
+        monthlyAttendance[monthKey] = [];
+      }
+      monthlyAttendance[monthKey].push({
+        date: holiday.holidayDate.toISOString().split('T')[0],
+        status: 'Holiday',
+        reason: holiday.reason,
+        actionTaken: ''
+      });
+    });
+
+    // Get recent attendance (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentAttendance = attendanceRecords.filter(record => record.date >= thirtyDaysAgo);
+
+    res.json({
+      status: 'success',
+      data: {
+        // Student basic info
+        student: {
+          id: student.userId._id,
+          rollNumber: student.rollNumber,
+          name: student.userId.name,
+          email: student.userId.email,
+          mobile: student.mobile || student.userId.mobile || 'N/A',
+          department: student.department,
+          year: student.year,
+          semester: student.semester,
+          section: student.section,
+          batch: student.batch,
+          classAssigned: student.classAssigned,
+          facultyName: student.facultyId?.name || 'Not assigned'
+        },
+        // Attendance statistics
+        attendanceStats: {
+          totalDays,
+          presentDays,
+          absentDays,
+          attendancePercentage
+        },
+        // Monthly attendance data for calendar
+        monthlyAttendance,
+        // Recent attendance for quick view
+        recentAttendance: recentAttendance.map(record => ({
+          date: record.date.toISOString().split('T')[0],
+          status: record.status,
+          reason: record.reason || '',
+          actionTaken: record.actionTaken || ''
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Get student profile error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch student profile' });
   }
 });
 

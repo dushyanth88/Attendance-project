@@ -30,7 +30,11 @@ export const authenticate = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
     }
 
+    console.log('🔐 Auth middleware - Token exists:', !!token);
+    console.log('🔐 Auth middleware - Authorization header:', req.headers.authorization?.substring(0, 20) + '...');
+
     if (!token) {
+      console.log('❌ Auth middleware - No token provided');
       return res.status(401).json({ 
         success: false,
         msg: 'Access denied. No token provided.' 
@@ -39,18 +43,23 @@ export const authenticate = async (req, res, next) => {
 
     // Verify token
     const decoded = verifyToken(token);
+    console.log('🔐 Auth middleware - Token decoded:', { id: decoded.id, role: decoded.role });
     
     // Get user from database
     const user = await User.findById(decoded.id).select('-password');
     
     if (!user) {
+      console.log('❌ Auth middleware - User not found for ID:', decoded.id);
       return res.status(401).json({ 
         success: false,
         msg: 'Token is not valid. User not found.' 
       });
     }
 
+    console.log('✅ Auth middleware - User found:', { id: user._id, role: user.role, department: user.department, status: user.status });
+
     if (user.status !== 'active') {
+      console.log('❌ Auth middleware - User account inactive:', user.status);
       return res.status(401).json({ 
         success: false,
         msg: 'Account is inactive or suspended.' 
@@ -88,7 +97,11 @@ export const authenticate = async (req, res, next) => {
 // Role-based authorization middleware
 export const authorize = (...allowedRoles) => {
   return (req, res, next) => {
+    console.log('🔒 Authorization middleware - User:', req.user ? { role: req.user.role } : 'No user');
+    console.log('🔒 Authorization middleware - Allowed roles:', allowedRoles);
+    
     if (!req.user) {
+      console.log('❌ Authorization middleware - No user found');
       return res.status(401).json({ 
         success: false,
         msg: 'Authentication required.' 
@@ -96,12 +109,14 @@ export const authorize = (...allowedRoles) => {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
+      console.log('❌ Authorization middleware - Role not allowed:', req.user.role);
       return res.status(403).json({ 
         success: false,
         msg: `Access denied. Required roles: ${allowedRoles.join(', ')}. Your role: ${req.user.role}` 
       });
     }
 
+    console.log('✅ Authorization middleware - Access granted');
     next();
   };
 };

@@ -15,15 +15,24 @@ const StudentList = ({ assignedClass, refreshTrigger }) => {
     
     try {
       setLoading(true);
-      const res = await apiFetch({ url: `/api/student/list/${assignedClass}?page=${page}&limit=10&search=${encodeURIComponent(search)}` });
+      // Legacy StudentList is tied to classId (e.g., "2021-2025, 2nd Year, Sem 3, Section A").
+      // We cannot derive batch/year/semester reliably from this string here without parsing rules.
+      // Keep legacy fetch as fallback but gracefully handle absence.
+      const res = await apiFetch({ url: `/api/classes/${encodeURIComponent(assignedClass)}/students` });
       const data = res.data;
-      
-      if (data.status === 'success') {
-        setStudents(data.data.students);
-        setTotalPages(data.data.pagination.pages);
-        setCurrentPage(data.data.pagination.current);
+
+      if (data && Array.isArray(data.students)) {
+        setStudents(data.students.map(s => ({
+          _id: s.id,
+          rollNumber: s.rollNo,
+          name: s.name,
+          email: s.email || '-',
+          mobile: s.mobile,
+        })));
+        setTotalPages(1);
+        setCurrentPage(1);
       } else {
-        setToast({ show: true, message: data.message || 'Failed to fetch students', type: 'error' });
+        setToast({ show: true, message: 'Failed to fetch students', type: 'error' });
       }
     } catch (error) {
       console.error('Error fetching students:', error);

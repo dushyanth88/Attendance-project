@@ -1,10 +1,16 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import CreateUserModal from '../../components/CreateUserModal';
+import FacultyList from '../../components/FacultyList';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [facultyRefreshTrigger, setFacultyRefreshTrigger] = useState(0);
+
+  const handleUserCreated = () => {
+    setFacultyRefreshTrigger(prev => prev + 1);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -136,12 +142,33 @@ const AdminDashboard = () => {
             </button>
           </div>
         </div>
+
+        {/* Faculty Management Section */}
+        <div className="mt-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4 sm:mb-0">
+              System Faculty Management
+            </h2>
+            <button
+              onClick={() => setShowCreateUserModal(true)}
+              className="w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors min-h-[44px]"
+            >
+              Create New User
+            </button>
+          </div>
+          
+          <FacultyList 
+            refreshTrigger={facultyRefreshTrigger}
+            userRole="admin"
+          />
+        </div>
       </main>
 
       {/* Create User Modal */}
       <CreateUserModal
         isOpen={showCreateUserModal}
         onClose={() => setShowCreateUserModal(false)}
+        onUserCreated={handleUserCreated}
         userRole="admin"
       />
     </div>

@@ -6,6 +6,11 @@ const attendanceSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  classId: {
+    type: String,
+    required: true,
+    trim: true
+  },
   facultyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -26,6 +31,12 @@ const attendanceSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'Reason cannot exceed 500 characters'],
     default: ''
+  },
+  actionTaken: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Action taken cannot exceed 500 characters'],
+    default: ''
   }
 }, {
   timestamps: true
@@ -39,7 +50,7 @@ attendanceSchema.pre('save', function(next) {
   next();
 });
 
-// Unique attendance record per student per day
-attendanceSchema.index({ studentId: 1, date: 1 }, { unique: true });
+// Unique attendance record per student per class per day
+attendanceSchema.index({ studentId: 1, classId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model('Attendance', attendanceSchema);

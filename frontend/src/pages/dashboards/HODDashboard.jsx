@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import CreateUserModal from '../../components/CreateUserModal';
-import CreateFacultyModal from '../../components/CreateFacultyModal';
 import FacultyList from '../../components/FacultyList';
 
 const HODDashboard = () => {
   const { user, logout } = useAuth();
   const [showCreateFacultyModal, setShowCreateFacultyModal] = useState(false);
   const [facultyRefreshTrigger, setFacultyRefreshTrigger] = useState(0);
+
+  const handleFacultyCreated = () => {
+    setFacultyRefreshTrigger(prev => prev + 1);
+    setShowCreateFacultyModal(false);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -153,18 +157,33 @@ const HODDashboard = () => {
         </div>
 
         {/* Faculty Management Section */}
-        <div className="mt-6 sm:mt-8">
+        <div className="mt-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4 sm:mb-0">
+              Department Faculty
+            </h2>
+            <button
+              onClick={() => setShowCreateFacultyModal(true)}
+              className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors min-h-[44px]"
+            >
+              Add New Faculty
+            </button>
+          </div>
+          
           <FacultyList 
             refreshTrigger={facultyRefreshTrigger}
+            userRole="hod"
+            department={user?.department}
           />
         </div>
       </main>
 
       {/* Create Faculty Modal */}
-      <CreateFacultyModal
+      <CreateUserModal
         isOpen={showCreateFacultyModal}
         onClose={() => setShowCreateFacultyModal(false)}
-        onFacultyCreated={() => setFacultyRefreshTrigger(prev => prev + 1)}
+        onUserCreated={handleFacultyCreated}
+        userRole="hod"
       />
     </div>
   );

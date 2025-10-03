@@ -38,9 +38,15 @@ const studentSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Year is required'],
     enum: {
-      values: ['1st', '2nd', '3rd', '4th'],
-      message: 'Year must be one of: 1st, 2nd, 3rd, 4th'
+      values: ['1st', '2nd', '3rd', '4th', '1st Year', '2nd Year', '3rd Year', '4th Year'],
+      message: 'Year must be one of: 1st, 2nd, 3rd, 4th, 1st Year, 2nd Year, 3rd Year, 4th Year'
     }
+  },
+  batch: {
+    type: String,
+    required: [true, 'Batch is required'],
+    match: [/^\d{4}-\d{4}$/, 'Batch must be in format YYYY-YYYY (e.g., 2022-2026)'],
+    trim: true
   },
   semester: {
     type: String,
@@ -58,7 +64,11 @@ const studentSchema = new mongoose.Schema({
   department: {
     type: String,
     required: [true, 'Department is required'],
-    trim: true
+    trim: true,
+    enum: {
+      values: ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'],
+      message: 'Department must be one of: CSE, IT, ECE, EEE, Civil, Mechanical, CSBS, AIDS'
+    }
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -101,8 +111,8 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Compound unique index to enforce roll number unique within class
-studentSchema.index({ classAssigned: 1, rollNumber: 1 }, { unique: true });
+// Compound unique index to enforce roll number unique within batch
+studentSchema.index({ batch: 1, rollNumber: 1 }, { unique: true });
 
 // Remove password from JSON output (legacy safety if present)
 studentSchema.methods.toJSON = function() {

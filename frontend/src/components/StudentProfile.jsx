@@ -1,172 +1,137 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import Toast from './Toast';
 import { apiFetch } from '../utils/apiFetch';
+import Toast from './Toast';
 
 const StudentProfile = () => {
-  const { id } = useParams();
+  const { studentId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const [student, setStudent] = useState(null);
-  const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [attendanceLoading, setAttendanceLoading] = useState(true);
+  const [studentData, setStudentData] = useState(null);
+  const [attendanceStats, setAttendanceStats] = useState(null);
+  const [monthlyAttendance, setMonthlyAttendance] = useState({});
+  const [recentAttendance, setRecentAttendance] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
   useEffect(() => {
     fetchStudentProfile();
-    fetchAttendanceData();
-  }, [id]);
+  }, [studentId]);
 
   const fetchStudentProfile = async () => {
     try {
       setLoading(true);
-      const res = await apiFetch({ 
-        url: `/api/students/${id}` 
+      const response = await apiFetch({
+        url: `/api/students/${studentId}/profile`,
+        method: 'GET'
       });
-      
-      if (res.data) {
-        setStudent(res.data);
+
+      const responseData = response.data;
+      if (responseData.status === 'success') {
+        setStudentData(responseData.data.student);
+        setAttendanceStats(responseData.data.attendanceStats);
+        setMonthlyAttendance(responseData.data.monthlyAttendance);
+        setRecentAttendance(responseData.data.recentAttendance);
       } else {
-        setToast({ show: true, message: 'Student not found', type: 'error' });
+        throw new Error(responseData.message || 'Failed to fetch student profile');
       }
     } catch (error) {
-      console.error('Error fetching student profile:', error);
-      const errorMessage = error.response?.data?.message || 'Error loading student profile';
-      setToast({ show: true, message: errorMessage, type: 'error' });
-      
-      if (error.response?.status === 404) {
-        setTimeout(() => navigate(-1), 2000);
-      }
+      console.error('Fetch student profile error:', error);
+      setToast({
+        show: true,
+        message: error.response?.data?.message || error.message || 'Failed to fetch student profile',
+        type: 'error'
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchAttendanceData = async () => {
-    try {
-      setAttendanceLoading(true);
-      const res = await apiFetch({ 
-        url: `/api/students/${id}/attendance` 
-      });
-      
-      if (res.data) {
-        setAttendance(res.data);
-      }
-    } catch (error) {
-      console.error('Error fetching attendance data:', error);
-      const errorMessage = error.response?.data?.message || 'Error loading attendance data';
-      setToast({ show: true, message: errorMessage, type: 'error' });
-    } finally {
-      setAttendanceLoading(false);
+  const getAttendanceColor = (status) => {
+    switch (status) {
+      case 'Present': return 'text-green-600 bg-green-100';
+      case 'Absent': return 'text-red-600 bg-red-100';
+      case 'Holiday': return 'text-yellow-600 bg-yellow-100';
+      default: return 'text-gray-600 bg-gray-100';
     }
   };
 
-  const AttendanceChart = ({ presentDays, absentDays }) => {
-    const total = presentDays + absentDays;
-    const presentPercentage = total > 0 ? (presentDays / total) * 100 : 0;
-    const absentPercentage = total > 0 ? (absentDays / total) * 100 : 0;
+  const getAttendanceIcon = (status) => {
+    switch (status) {
+      case 'Present': return '✅';
+      case 'Absent': return '❌';
+      case 'Holiday': return '🎉';
+      default: return '⚪';
+    }
+  };
+
+  const renderCalendar = () => {
+    if (!monthlyAttendance[selectedMonth]) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          No attendance data for {selectedMonth}
+        </div>
+      );
+    }
+
+    const monthData = monthlyAttendance[selectedMonth];
+    const year = parseInt(selectedMonth.split('-')[0]);
+    const month = parseInt(selectedMonth.split('-')[1]) - 1;
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+
+    const days = [];
+    
+    // Add empty cells for days before the first day of the month
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    
+    // Add days of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const attendance = monthData.find(record => record.date === dateStr);
+      days.push({ day, date: dateStr, attendance });
+    }
 
     return (
-      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-100">
-        <h4 className="text-lg font-semibold mb-6 text-center text-gray-800">Attendance Visualization</h4>
+      <div className="grid grid-cols-7 gap-1">
+        {/* Day headers */}
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+          <div key={day} className="p-2 text-center text-sm font-medium text-gray-500 bg-gray-50">
+            {day}
+          </div>
+        ))}
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Bar Chart */}
-          <div className="space-y-4">
-            <h5 className="font-medium text-gray-700 text-center mb-4">Progress Bars</h5>
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-green-600 font-medium flex items-center">
-                  <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
-                  Present Days
-                </span>
-                <span className="text-green-600 font-bold">{presentDays} ({presentPercentage.toFixed(1)}%)</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                <div 
-                  className="bg-gradient-to-r from-green-400 to-green-600 h-4 rounded-full transition-all duration-500 shadow-sm"
-                  style={{ width: `${presentPercentage}%` }}
-                ></div>
-              </div>
-            </div>
-            
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-red-600 font-medium flex items-center">
-                  <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
-                  Absent Days
-                </span>
-                <span className="text-red-600 font-bold">{absentDays} ({absentPercentage.toFixed(1)}%)</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                <div 
-                  className="bg-gradient-to-r from-red-400 to-red-600 h-4 rounded-full transition-all duration-500 shadow-sm"
-                  style={{ width: `${absentPercentage}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Enhanced Pie Chart */}
-          <div className="flex flex-col items-center">
-            <h5 className="font-medium text-gray-700 text-center mb-4">Overall Attendance</h5>
-            <div className="relative w-40 h-40">
-              <svg className="w-40 h-40 transform -rotate-90" viewBox="0 0 36 36">
-                {/* Background circle */}
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="16"
-                  fill="transparent"
-                  stroke="#f3f4f6"
-                  strokeWidth="4"
-                />
-                {/* Present percentage arc */}
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="16"
-                  fill="transparent"
-                  stroke="url(#greenGradient)"
-                  strokeWidth="4"
-                  strokeDasharray={`${presentPercentage} ${100 - presentPercentage}`}
-                  strokeDashoffset="0"
-                  strokeLinecap="round"
-                  className="transition-all duration-700"
-                />
-                {/* Gradient definitions */}
-                <defs>
-                  <linearGradient id="greenGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#10b981" />
-                    <stop offset="100%" stopColor="#059669" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-gray-900">
-                    {attendance?.attendancePercentage || 0}%
+        {/* Calendar days */}
+        {days.map((dayData, index) => (
+          <div
+            key={index}
+            className={`p-2 text-center text-sm border rounded relative group ${
+              dayData ? 'bg-white hover:bg-gray-50' : 'bg-gray-100'
+            }`}
+          >
+            {dayData && (
+              <>
+                <div className="font-medium">{dayData.day}</div>
+                {dayData.attendance && (
+                  <div className={`text-xs mt-1 ${getAttendanceColor(dayData.attendance.status)} px-1 py-0.5 rounded`}>
+                    {getAttendanceIcon(dayData.attendance.status)}
                   </div>
-                  <div className="text-xs text-gray-500 font-medium">Attendance</div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Legend */}
-            <div className="flex justify-center space-x-4 mt-4">
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-                <span className="text-xs text-gray-600">Present</span>
-              </div>
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-gray-300 rounded-full mr-2"></div>
-                <span className="text-xs text-gray-600">Absent</span>
-              </div>
-            </div>
+                )}
+                {/* Tooltip for holidays */}
+                {dayData.attendance && dayData.attendance.status === 'Holiday' && (
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-yellow-600 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10">
+                    {dayData.attendance.reason}
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        </div>
+        ))}
       </div>
     );
   };
@@ -174,19 +139,24 @@ const StudentProfile = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading student profile...</p>
+        </div>
       </div>
     );
   }
 
-  if (!student) {
+  if (!studentData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Student Not Found</h2>
+          <div className="text-6xl mb-4">👤</div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Student Not Found</h2>
+          <p className="text-gray-600 mb-4">The requested student profile could not be found.</p>
           <button
             onClick={() => navigate(-1)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
           >
             Go Back
           </button>
@@ -197,14 +167,6 @@ const StudentProfile = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {toast.show && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast({ show: false, message: '', type: 'success' })}
-        />
-      )}
-
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -212,13 +174,13 @@ const StudentProfile = () => {
             <div className="flex items-center">
               <button
                 onClick={() => navigate(-1)}
-                className="mr-4 text-gray-600 hover:text-gray-900 transition-colors"
+                className="mr-4 p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 ← Back
               </button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Student Profile</h1>
-                <p className="text-gray-600">Detailed view and attendance dashboard</p>
+                <p className="text-gray-600">{studentData.name} - {studentData.rollNumber}</p>
               </div>
             </div>
           </div>
@@ -227,155 +189,179 @@ const StudentProfile = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Student Profile Card */}
-          <div className="lg:col-span-1">
+          {/* Left Column - Personal Info & Stats */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Personal Information */}
             <div className="bg-white rounded-lg shadow-md p-6">
-              <div className="text-center mb-6">
-                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl font-bold text-blue-600">
-                    {student.name.charAt(0).toUpperCase()}
-                  </span>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Roll Number</label>
+                  <p className="text-gray-900">{studentData.rollNumber}</p>
                 </div>
-                <h2 className="text-xl font-bold text-gray-900">{student.name}</h2>
-                <p className="text-gray-600">Roll No: {student.rollNo}</p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="border-t pt-4">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Student Details</h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Roll No:</span>
-                      <span className="font-medium">{student.rollNo}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Name:</span>
-                      <span className="font-medium">{student.name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Department:</span>
-                      <span className="font-medium">{student.dept}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Mobile:</span>
-                      <span className="font-medium">{student.mobile}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Year:</span>
-                      <span className="font-medium">{student.year}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Current Semester:</span>
-                      <span className="font-medium">{student.semester}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Class:</span>
-                      <span className="font-medium">{student.classAssigned}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Email:</span>
-                      <span className="font-medium text-sm">{student.email}</span>
-                    </div>
-                  </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Full Name</label>
+                  <p className="text-gray-900">{studentData.name}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Email</label>
+                  <p className="text-gray-900">{studentData.email}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Phone Number</label>
+                  <p className="text-gray-900">{studentData.mobile}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Department</label>
+                  <p className="text-gray-900">{studentData.department}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Academic Info</label>
+                  <p className="text-gray-900">
+                    {studentData.batch} | {studentData.year} | {studentData.semester}
+                    {studentData.section && ` | Section ${studentData.section}`}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Class Teacher</label>
+                  <p className="text-gray-900">{studentData.facultyName}</p>
                 </div>
               </div>
             </div>
+
+            {/* Attendance Summary Cards */}
+            {attendanceStats && (
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">✅</span>
+                      <span className="font-medium text-green-800">Days Present</span>
+                    </div>
+                    <span className="text-2xl font-bold text-green-600">{attendanceStats.presentDays}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">❌</span>
+                      <span className="font-medium text-red-800">Days Absent</span>
+                    </div>
+                    <span className="text-2xl font-bold text-red-600">{attendanceStats.absentDays}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">📅</span>
+                      <span className="font-medium text-blue-800">Total Working Days</span>
+                    </div>
+                    <span className="text-2xl font-bold text-blue-600">{attendanceStats.totalDays}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">📊</span>
+                      <span className="font-medium text-purple-800">Attendance %</span>
+                    </div>
+                    <span className="text-2xl font-bold text-purple-600">{attendanceStats.attendancePercentage}%</span>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="mt-6">
+                  <div className="flex justify-between text-sm text-gray-600 mb-2">
+                    <span>Attendance Progress</span>
+                    <span>{attendanceStats.attendancePercentage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div
+                      className={`h-3 rounded-full transition-all duration-300 ${
+                        attendanceStats.attendancePercentage >= 75 ? 'bg-green-500' :
+                        attendanceStats.attendancePercentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${attendanceStats.attendancePercentage}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Attendance Dashboard */}
-          <div className="lg:col-span-2">
+          {/* Right Column - Calendar & Recent Attendance */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Monthly Calendar */}
             <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-xl font-bold text-gray-900 mb-6">Attendance Dashboard</h3>
-              
-              {attendanceLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                </div>
-              ) : attendance ? (
-                <div className="space-y-6">
-                  {/* Statistics Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-green-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-green-600">
-                        {attendance.presentDays}
-                      </div>
-                      <div className="text-sm text-green-700">Total Days Present</div>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-red-600">
-                        {attendance.absentDays}
-                      </div>
-                      <div className="text-sm text-red-700">Total Days Absent</div>
-                    </div>
-                    <div className="bg-blue-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {attendance.attendancePercentage}%
-                      </div>
-                      <div className="text-sm text-blue-700">Attendance %</div>
-                    </div>
-                    <div className="bg-yellow-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-yellow-600">
-                        {attendance.semesterAbsents}
-                      </div>
-                      <div className="text-sm text-yellow-700">Current Semester Absents</div>
-                    </div>
-                  </div>
-
-                  {/* Attendance Chart */}
-                  <AttendanceChart 
-                    presentDays={attendance.presentDays} 
-                    absentDays={attendance.absentDays} 
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Monthly Calendar View</h3>
+                <div className="flex items-center space-x-4">
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
-
-                  {/* Recent Attendance History */}
-                  <div>
-                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Recent Attendance History</h4>
-                    <div className="max-h-64 overflow-y-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50 sticky top-0">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Date
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Status
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {attendance.attendanceHistory.slice(0, 20).map((record, index) => (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {new Date(record.date).toLocaleDateString()}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                  record.status === 'Present' 
-                                    ? 'bg-green-100 text-green-800' 
-                                    : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {record.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  <div className="flex items-center space-x-4 text-sm">
+                    <div className="flex items-center">
+                      <span className="w-3 h-3 bg-green-100 rounded mr-2">✅</span>
+                      <span>Present</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-3 h-3 bg-red-100 rounded mr-2">❌</span>
+                      <span>Absent</span>
                     </div>
                   </div>
+                </div>
+              </div>
+              {renderCalendar()}
+            </div>
+
+            {/* Recent Attendance */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Attendance (Last 30 Days)</h3>
+              {recentAttendance.length > 0 ? (
+                <div className="space-y-2">
+                  {recentAttendance.slice(0, 10).map((record, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex items-center">
+                        <span className="text-lg mr-3">{getAttendanceIcon(record.status)}</span>
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {new Date(record.date).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })}
+                          </p>
+                          {record.reason && (
+                            <p className="text-sm text-gray-600">Reason: {record.reason}</p>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${getAttendanceColor(record.status)}`}>
+                        {record.status}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="text-center py-8">
-                  <div className="text-gray-400 text-6xl mb-4">📊</div>
-                  <h4 className="text-lg font-semibold text-gray-900 mb-2">No Attendance Records Found</h4>
-                  <p className="text-gray-600">This student doesn't have any attendance records yet.</p>
+                <div className="text-center py-8 text-gray-500">
+                  No recent attendance records found
                 </div>
               )}
             </div>
           </div>
         </div>
       </main>
+
+      {/* Toast */}
+      {toast.show && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ show: false, message: '', type: 'success' })}
+        />
+      )}
     </div>
   );
 };

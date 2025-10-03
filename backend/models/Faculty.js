@@ -31,14 +31,50 @@ const facultySchema = new mongoose.Schema({
   assignedClass: {
     type: String,
     required: [true, 'Assigned class is required'],
-    enum: {
-      values: ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B', 'None'],
-      message: 'Assigned class must be one of: 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B, None'
-    }
+    trim: true,
+    default: 'None'
   },
   department: {
     type: String,
     required: [true, 'Department is required'],
+    trim: true,
+    enum: {
+      values: ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'],
+      message: 'Department must be one of: CSE, IT, ECE, EEE, Civil, Mechanical, CSBS, AIDS'
+    }
+  },
+  // Class Advisor fields
+  is_class_advisor: {
+    type: Boolean,
+    default: false
+  },
+  batch: {
+    type: String,
+    required: function() { return this.is_class_advisor; },
+    match: [/^\d{4}-\d{4}$/, 'Batch must be in format YYYY-YYYY (e.g., 2022-2026)'],
+    trim: true
+  },
+  year: {
+    type: String,
+    required: function() { return this.is_class_advisor; },
+    enum: {
+      values: ['1st Year', '2nd Year', '3rd Year', '4th Year'],
+      message: 'Year must be one of: 1st Year, 2nd Year, 3rd Year, 4th Year'
+    }
+  },
+  semester: {
+    type: Number,
+    required: function() { return this.is_class_advisor; },
+    min: [1, 'Semester must be between 1 and 8'],
+    max: [8, 'Semester must be between 1 and 8']
+  },
+  section: {
+    type: String,
+    required: function() { return this.is_class_advisor; },
+    enum: {
+      values: ['A', 'B', 'C'],
+      message: 'Section must be one of: A, B, C'
+    },
     trim: true
   },
   createdBy: {
@@ -70,6 +106,19 @@ const facultySchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Method to get advisor assignment display string
+facultySchema.methods.getAdvisorAssignment = function() {
+  if (this.is_class_advisor) {
+    return `Class Advisor for Batch ${this.batch}, ${this.year}, Semester ${this.semester}, Section ${this.section}`;
+  }
+  return 'Not a Class Advisor';
+};
+
+// Method to check if faculty can be assigned as advisor
+facultySchema.methods.canBeAssignedAsAdvisor = function() {
+  return this.status === 'active';
+};
 
 // Remove password from JSON output (legacy safety if present)
 facultySchema.methods.toJSON = function() {

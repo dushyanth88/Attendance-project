@@ -8,7 +8,11 @@ import HODDashboard from './pages/dashboards/HODDashboard';
 import FacultyDashboard from './pages/dashboards/FacultyDashboard';
 import StudentDashboard from './pages/dashboards/StudentDashboard';
 import ClassManagementPage from './pages/ClassManagementPage';
+import ClassSelectionPage from './pages/ClassSelectionPage';
+import AssignedBatchesPage from './pages/AssignedBatchesPage';
+import StudentManagementPage from './pages/StudentManagementPage';
 import EnhancedStudentProfile from './components/EnhancedStudentProfile';
+import StudentProfile from './components/StudentProfile';
 import ReportGeneration from './components/ReportGeneration';
 import './App.css';
 
@@ -63,10 +67,50 @@ function App() {
               } 
             />
             <Route 
+              path="/class-management" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <ClassManagementPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
               path="/class-management/:classId" 
               element={
                 <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
                   <ClassManagementPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/class-selection" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <ClassSelectionPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/assigned-batches" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <AssignedBatchesPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/student-management" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
+                  <StudentManagementPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/student-profile/:studentId" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin', 'student']}>
+                  <StudentProfile />
                 </ProtectedRoute>
               } 
             />

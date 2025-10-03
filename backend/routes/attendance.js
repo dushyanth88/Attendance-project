@@ -4,10 +4,120 @@ import Attendance from '../models/Attendance.js';
 import User from '../models/User.js';
 import Student from '../models/Student.js';
 import Faculty from '../models/Faculty.js';
-import { authenticate, facultyAndAbove, hodAndAbove, principalAndAbove } from '../middleware/auth.js';
+import { authenticate, facultyAndAbove, hodAndAbove, principalAndAbove, verifyToken } from '../middleware/auth.js';
 import ClassAttendance from '../models/ClassAttendance.js';
 
 const router = express.Router();
+
+// Helpers for year/semester normalization
+const normalizeYear = (yearInput) => {
+  if (!yearInput) return undefined;
+  const asString = String(yearInput).trim();
+  if (/^\d+$/.test(asString)) {
+    const n = parseInt(asString, 10);
+    if (n === 1) return '1st Year';
+    if (n === 2) return '2nd Year';
+    if (n === 3) return '3rd Year';
+    if (n === 4) return '4th Year';
+  }
+  if (/^\d(st|nd|rd|th)\s*Year$/i.test(asString)) return asString.replace(/\s+/g, ' ');
+  if (['1st', '2nd', '3rd', '4th'].includes(asString)) {
+    return `${asString} Year`;
+  }
+  return asString;
+};
+
+const normalizeSemester = (semInput) => {
+  if (!semInput && semInput !== 0) return undefined;
+  const asString = String(semInput).trim();
+  if (/^\d+$/.test(asString)) {
+    return `Sem ${parseInt(asString, 10)}`;
+  }
+  if (/^Sem\s*\d$/i.test(asString)) {
+    const n = asString.match(/\d+/)?.[0];
+    return `Sem ${n}`;
+  }
+  return asString;
+};
+
+const makeClassKey = ({ batch, year, semester, section }) => {
+  return `${batch}|${year}|${semester}${section ? `|${section}` : ''}`;
+};
+
+// SSE clients mapped by student userId => Set of response streams
+const studentSseClients = new Map();
+
+const addSseClient = (studentUserId, res) => {
+  if (!studentSseClients.has(studentUserId)) {
+    studentSseClients.set(studentUserId, new Set());
+  }
+  studentSseClients.get(studentUserId).add(res);
+};
+
+const removeSseClient = (studentUserId, res) => {
+  const set = studentSseClients.get(studentUserId);
+  if (!set) return;
+  set.delete(res);
+  if (set.size === 0) studentSseClients.delete(studentUserId);
+};
+
+const sendAttendanceEvent = (studentUserId, payload) => {
+  const set = studentSseClients.get(String(studentUserId));
+  if (!set || set.size === 0) return;
+  const data = `event: attendance\n` + `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) {
+    try { res.write(data); } catch (_) { /* ignore broken pipe */ }
+  }
+};
+
+// @desc    SSE stream for student real-time attendance updates
+// @route   GET /api/attendance/stream?token=... (JWT access token)
+// @access  Student (self)
+router.get('/stream', async (req, res) => {
+  try {
+    const token = req.query.token;
+    if (!token) {
+      return res.status(401).json({ status: 'error', message: 'Token required' });
+    }
+    let decoded;
+    try {
+      decoded = verifyToken(token);
+    } catch (e) {
+      return res.status(401).json({ status: 'error', message: 'Invalid token' });
+    }
+    const user = await User.findById(decoded.id).select('_id role status');
+    if (!user || user.status !== 'active' || user.role !== 'student') {
+      return res.status(403).json({ status: 'error', message: 'Unauthorized' });
+    }
+
+    // Setup SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    // Register client
+    const studentUserId = String(user._id);
+    addSseClient(studentUserId, res);
+
+    // Initial event to confirm connection
+    res.write(`event: connected\n` + `data: {"status":"ok"}\n\n`);
+
+    // Heartbeat
+    const hb = setInterval(() => {
+      try { res.write(`: ping\n\n`); } catch (_) { /* ignore */ }
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(hb);
+      removeSseClient(studentUserId, res);
+      try { res.end(); } catch (_) {}
+    });
+  } catch (error) {
+    console.error('SSE stream error:', error);
+    try { res.end(); } catch (_) {}
+  }
+});
 
 // @desc    Mark daily attendance for a class
 // @route   POST /api/attendance/mark
@@ -539,6 +649,273 @@ router.get('/history', authenticate, facultyAndAbove, async (req, res) => {
   } catch (error) {
     console.error('Get attendance history error:', error);
     res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+});
+
+// --- New endpoints based on Student Management (batch/year/semester[/section]) ---
+
+// @desc    Mark attendance for a class by batch/year/semester (defaults Present, mark absentees)
+// @route   POST /api/attendance/mark-students
+// @access  Faculty and above
+router.post('/mark-students', authenticate, facultyAndAbove, [
+  body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
+  body('year').exists().withMessage('Year is required'),
+  body('semester').exists().withMessage('Semester is required'),
+  body('section').optional().isString().trim(),
+  body('date').optional().isISO8601().withMessage('Invalid date format'),
+  body('absentRollNumbers').optional().isArray().withMessage('absentRollNumbers must be an array')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ status: 'error', message: 'Validation failed', errors: errors.array() });
+    }
+
+    const currentUser = req.user;
+    const { batch, section } = req.body;
+    const normalizedYear = normalizeYear(req.body.year);
+    const normalizedSemester = normalizeSemester(req.body.semester);
+
+    // Authorization: verify faculty is advisor for this class
+    const faculty = await Faculty.findOne({
+      userId: currentUser._id,
+      is_class_advisor: true,
+      batch,
+      year: normalizedYear,
+      semester: parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      ...(section ? { section } : {}),
+      department: currentUser.department,
+      status: 'active'
+    });
+    if (!faculty) {
+      return res.status(403).json({ status: 'error', message: 'You are not authorized to mark attendance for this class' });
+    }
+
+    // Date normalize
+    const requestDate = req.body.date ? new Date(req.body.date) : new Date();
+    requestDate.setHours(0, 0, 0, 0);
+
+    // Fetch students from Student Management list
+    const students = await Student.find({
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: currentUser.department,
+      status: 'active'
+    }).select('rollNumber userId');
+
+    if (!students || students.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'No students found for this class' });
+    }
+
+    const absentees = Array.isArray(req.body.absentRollNumbers) ? req.body.absentRollNumbers.map(r => String(r).trim()) : [];
+    const rollToStudent = new Map(students.map(s => [s.rollNumber, s]));
+    for (const roll of absentees) {
+      if (!rollToStudent.has(roll)) {
+        return res.status(400).json({ status: 'error', message: `Invalid absentee roll number: ${roll}` });
+      }
+    }
+
+    // Upsert attendance records: one per student per date
+    const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
+    const bulkOps = students.map(s => ({
+      updateOne: {
+        filter: { studentId: s.userId, classId: classKey, date: requestDate },
+        update: {
+          $set: {
+            status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present',
+            facultyId: currentUser._id,
+            date: requestDate,
+            classId: classKey
+          }
+        },
+        upsert: true
+      }
+    }));
+
+    await Attendance.bulkWrite(bulkOps, { ordered: true });
+
+    // Push SSE updates to impacted students
+    for (const s of students) {
+      const status = absentees.includes(s.rollNumber) ? 'Absent' : 'Present';
+      sendAttendanceEvent(String(s.userId), {
+        date: requestDate.toISOString().slice(0, 10),
+        status
+      });
+    }
+
+    // Upsert ClassAttendance mark summary
+    await ClassAttendance.findOneAndUpdate(
+      { classId: classKey, date: requestDate },
+      {
+        classId: classKey,
+        date: requestDate,
+        absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
+        markedBy: currentUser._id
+      },
+      { upsert: true }
+    );
+
+    return res.status(200).json({ status: 'success', message: 'Attendance saved successfully' });
+  } catch (error) {
+    console.error('Mark students attendance error:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to save attendance' });
+  }
+});
+
+// @desc    Edit attendance for a class by batch/year/semester
+// @route   PUT /api/attendance/edit-students
+// @access  Faculty and above
+router.put('/edit-students', authenticate, facultyAndAbove, [
+  body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
+  body('year').exists().withMessage('Year is required'),
+  body('semester').exists().withMessage('Semester is required'),
+  body('section').optional().isString().trim(),
+  body('date').isISO8601().withMessage('Invalid date format'),
+  body('absentRollNumbers').isArray().withMessage('absentRollNumbers must be an array')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ status: 'error', message: 'Validation failed', errors: errors.array() });
+    }
+
+    const currentUser = req.user;
+    const { batch, section } = req.body;
+    const normalizedYear = normalizeYear(req.body.year);
+    const normalizedSemester = normalizeSemester(req.body.semester);
+
+    // Authorization
+    const faculty = await Faculty.findOne({
+      userId: currentUser._id,
+      is_class_advisor: true,
+      batch,
+      year: normalizedYear,
+      semester: parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      ...(section ? { section } : {}),
+      department: currentUser.department,
+      status: 'active'
+    });
+    if (!faculty) {
+      return res.status(403).json({ status: 'error', message: 'You are not authorized to edit attendance for this class' });
+    }
+
+    const requestDate = new Date(req.body.date);
+    requestDate.setHours(0, 0, 0, 0);
+
+    const students = await Student.find({
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: currentUser.department,
+      status: 'active'
+    }).select('rollNumber userId');
+
+    if (!students || students.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'No students found for this class' });
+    }
+
+    const absentees = req.body.absentRollNumbers.map(r => String(r).trim());
+    const rollToStudent = new Map(students.map(s => [s.rollNumber, s]));
+    for (const roll of absentees) {
+      if (!rollToStudent.has(roll)) {
+        return res.status(400).json({ status: 'error', message: `Invalid absentee roll number: ${roll}` });
+      }
+    }
+
+    const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
+    const bulkOps = students.map(s => ({
+      updateOne: {
+        filter: { studentId: s.userId, classId: classKey, date: requestDate },
+        update: { $set: { status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present', facultyId: currentUser._id, classId: classKey } },
+        upsert: true
+      }
+    }));
+
+    await Attendance.bulkWrite(bulkOps, { ordered: true });
+
+    // Push SSE updates
+    for (const s of students) {
+      const status = absentees.includes(s.rollNumber) ? 'Absent' : 'Present';
+      sendAttendanceEvent(String(s.userId), {
+        date: requestDate.toISOString().slice(0, 10),
+        status
+      });
+    }
+
+    await ClassAttendance.findOneAndUpdate(
+      { classId: classKey, date: requestDate },
+      { absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)), markedBy: currentUser._id },
+      { upsert: true }
+    );
+
+    return res.status(200).json({ status: 'success', message: 'Attendance updated successfully' });
+  } catch (error) {
+    console.error('Edit students attendance error:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to update attendance' });
+  }
+});
+
+// @desc    Attendance history by batch/year/semester and date
+// @route   GET /api/attendance/history-by-class?batch=...&year=...&semester=...&date=YYYY-MM-DD[&section=A]
+// @access  Faculty and above
+router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const { batch, year, semester, section, date } = req.query;
+    if (!batch || !year || !semester || !date) {
+      return res.status(400).json({ status: 'error', message: 'batch, year, semester and date are required' });
+    }
+
+    const currentUser = req.user;
+    const normalizedYear = normalizeYear(year);
+    const normalizedSemester = normalizeSemester(semester);
+
+    // Authorization
+    const faculty = await Faculty.findOne({
+      userId: currentUser._id,
+      is_class_advisor: true,
+      batch,
+      year: normalizedYear,
+      semester: parseInt(String(semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      ...(section ? { section } : {}),
+      department: currentUser.department,
+      status: 'active'
+    });
+    if (!faculty) {
+      return res.status(403).json({ status: 'error', message: 'You are not authorized to view attendance for this class' });
+    }
+
+    const queryDate = new Date(date);
+    queryDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(queryDate);
+    endDate.setHours(23, 59, 59, 999);
+
+    const studentsInClass = await Student.find({
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: currentUser.department,
+      status: 'active'
+    }).select('rollNumber name userId');
+
+    const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
+    const attendanceRecords = await Attendance.find({
+      studentId: { $in: studentsInClass.map(s => s.userId) },
+      classId: classKey,
+      date: { $gte: queryDate, $lte: endDate }
+    }).select('studentId status');
+
+    const attendanceMap = new Map(attendanceRecords.map(att => [att.studentId.toString(), att.status]));
+    const records = studentsInClass.map(student => ({
+      rollNo: student.rollNumber,
+      name: student.name,
+      status: attendanceMap.get(student.userId.toString()) || 'Present'
+    }));
+
+    res.status(200).json({ status: 'success', data: { records } });
+  } catch (error) {
+    console.error('History by class error:', error);
+    res.status(500).json({ status: 'error', message: 'Unable to fetch attendance history' });
   }
 });
 

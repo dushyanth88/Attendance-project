@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Toast from './Toast';
 
-const FacultyList = ({ refreshTrigger }) => {
+const FacultyList = ({ refreshTrigger, userRole, department }) => {
   const [faculties, setFaculties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,9 +12,11 @@ const FacultyList = ({ refreshTrigger }) => {
   const fetchFaculties = async (page = 1, search = '') => {
     try {
       setLoading(true);
+      const accessToken = localStorage.getItem('accessToken');
+      console.log('Fetching faculties with token:', !!accessToken);
       const response = await fetch(`/api/faculty/list?page=${page}&limit=10&search=${search}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+          'Authorization': `Bearer ${accessToken}`
         }
       });
 
@@ -143,7 +145,15 @@ const FacultyList = ({ refreshTrigger }) => {
               </div>
               <p className="text-sm text-gray-600 mb-1">{faculty.position}</p>
               <p className="text-sm text-gray-600 mb-1">Class: {faculty.assignedClass}</p>
+              {userRole === 'admin' && (
+                <p className="text-sm text-gray-600 mb-1">Department: {faculty.department}</p>
+              )}
               <p className="text-sm text-gray-500">{faculty.email}</p>
+              {faculty.is_class_advisor && (
+                <p className="text-xs text-green-600 font-medium mt-2">
+                  ✅ Class Advisor: {faculty.batch}, {faculty.year}, Sem {faculty.semester}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -162,6 +172,11 @@ const FacultyList = ({ refreshTrigger }) => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Assigned Class
                 </th>
+                {userRole === 'admin' && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Department
+                  </th>
+                )}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Email
                 </th>
@@ -188,8 +203,20 @@ const FacultyList = ({ refreshTrigger }) => {
                       {faculty.assignedClass}
                     </span>
                   </td>
+                  {userRole === 'admin' && (
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                        {faculty.department}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {faculty.email}
+                    {faculty.is_class_advisor && (
+                      <div className="text-xs text-green-600 font-medium mt-1">
+                        ✅ Class Advisor: {faculty.batch}, {faculty.year}, Sem {faculty.semester}
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <button
