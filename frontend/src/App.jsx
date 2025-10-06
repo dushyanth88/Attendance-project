@@ -1,6 +1,7 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import ScrollToTop from './components/ScrollToTop';
 import Login from './pages/Login';
 import AdminDashboard from './pages/dashboards/AdminDashboard';
 import PrincipalDashboard from './pages/dashboards/PrincipalDashboard';
@@ -16,12 +17,12 @@ import StudentProfile from './components/StudentProfile';
 import ReportGeneration from './components/ReportGeneration';
 import './App.css';
 
-function App() {
+// Wrapper component to add unique keys to routes
+const AppRoutes = () => {
+  const location = useLocation();
+  
   return (
-    <AuthProvider>
-      <Router>
-        <div className="App">
-          <Routes>
+    <Routes location={location} key={location.pathname}>
             {/* Public Routes */}
             <Route path="/login" element={<Login />} />
             
@@ -134,7 +135,17 @@ function App() {
             {/* Default redirect */}
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
+    </Routes>
+  );
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <ScrollToTop />
+        <div className="App">
+          <AppRoutes />
         </div>
       </Router>
     </AuthProvider>

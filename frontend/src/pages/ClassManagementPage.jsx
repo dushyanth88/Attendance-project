@@ -29,6 +29,13 @@ const ClassManagementPage = () => {
     fetchBatchRanges();
   }, []);
 
+  // Scroll to top when data loads
+  useEffect(() => {
+    if (!loading && students.length > 0) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [loading, students.length]);
+
   const fetchFacultyProfile = async () => {
     try {
       const response = await apiFetch({
@@ -297,8 +304,8 @@ const ClassManagementPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">

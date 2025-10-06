@@ -123,6 +123,13 @@ const FacultyDashboard = () => {
     fetchFacultyProfile();
   }, [fetchFacultyProfile]);
 
+  // Scroll to top when data loads
+  useEffect(() => {
+    if (facultyProfile && assignedClass) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [facultyProfile, assignedClass]);
+
   // Check attendance status when faculty profile is loaded and date changes
   useEffect(() => {
     if (facultyProfile && attendanceForm.date) {
@@ -307,8 +314,8 @@ const FacultyDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">

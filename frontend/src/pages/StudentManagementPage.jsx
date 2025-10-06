@@ -124,6 +124,13 @@ const StudentManagementPage = () => {
     fetchStudents();
   }, [fetchStudents]);
 
+  // Scroll to top when data loads
+  useEffect(() => {
+    if (!loading && students.length > 0) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [loading, students.length]);
+
   // Real-time search filtering - only roll number and name
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -254,8 +261,8 @@ const StudentManagementPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>

@@ -87,6 +87,13 @@ const ReportGeneration = () => {
     }
   }, [facultyProfile]);
 
+  // Scroll to top when data loads
+  useEffect(() => {
+    if (!loading && reportData) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [loading, reportData]);
+
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({
       ...prev,
@@ -330,8 +337,8 @@ const ReportGeneration = () => {
         />
       )}
 
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center">
             <button onClick={() => navigate(-1)} className="mr-4 text-gray-600 hover:text-gray-900">

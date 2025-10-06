@@ -14,6 +14,8 @@ const HolidayManagement = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       fetchHolidays();
+      // Scroll to top when modal opens
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [isOpen]);
 

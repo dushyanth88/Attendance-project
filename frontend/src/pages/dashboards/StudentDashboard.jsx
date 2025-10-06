@@ -21,6 +21,9 @@ const StudentDashboard = () => {
           const today = new Date().toISOString().slice(0,10);
           const todayRec = data.attendance.find(a => a.date === today);
           setTodayStatus(todayRec ? todayRec.status : '-');
+          
+          // Scroll to top when data loads
+          window.scrollTo({ top: 0, behavior: 'smooth' });
         }
       } catch (e) {
         // noop for now
@@ -68,8 +71,8 @@ const StudentDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">
