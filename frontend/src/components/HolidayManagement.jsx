@@ -53,14 +53,19 @@ const HolidayManagement = ({ isOpen, onClose }) => {
       return;
     }
 
+    console.log('🗑️ Deleting holiday:', holidayId);
+
     try {
       const response = await apiFetch({
         url: `/api/holidays/${holidayId}`,
         method: 'DELETE'
       });
 
+      console.log('🗑️ Delete response:', response);
+
       const responseData = response.data;
       if (responseData.status === 'success') {
+        console.log('✅ Holiday deleted successfully, refreshing list...');
         setToast({
           show: true,
           message: 'Holiday deleted successfully',

@@ -14,6 +14,10 @@ const classAttendanceSchema = new mongoose.Schema({
     type: Number,
     required: true
   }],
+  presentRollNumbers: [{
+    type: Number,
+    required: true
+  }],
   markedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

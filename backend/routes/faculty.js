@@ -223,6 +223,23 @@ router.post('/create', [
     } = req.body;
     const currentUser = req.user;
 
+    // Validate year-semester combination for class advisors
+    if (is_class_advisor && year && semester) {
+      const validSemesters = {
+        "1st Year": [1, 2],
+        "2nd Year": [3, 4],
+        "3rd Year": [5, 6],
+        "4th Year": [7, 8]
+      };
+      
+      if (!validSemesters[year] || !validSemesters[year].includes(parseInt(semester))) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid year-semester combination. Please select valid semester for the chosen year.'
+        });
+      }
+    }
+
     console.log('🔍 Faculty creation data received:', {
       is_class_advisor,
       batch,
@@ -583,9 +600,17 @@ router.get('/students', authenticate, async (req, res) => {
       semester: `Sem ${semester}`,
       department,
       status: 'active'
-    }).sort({ rollNumber: 1 });
+    }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
 
     console.log('📊 Found students:', students.length);
+    console.log('📊 Student data structure:', students.map(s => ({
+      _id: s._id,
+      rollNumber: s.rollNumber,
+      name: s.name,
+      email: s.email,
+      mobile: s.mobile,
+      userId: s.userId
+    })));
 
     res.json({
       success: true,

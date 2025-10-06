@@ -107,11 +107,16 @@ router.get('/', async (req, res) => {
     const yearNumber = parseYearNumber(normalizedYear);
     const semesterNumber = parseSemesterNumber(normalizedSemester);
     const data = students.map(s => ({
-      id: s.userId, // Use userId (User ID) instead of Student document ID
+      id: s._id, // Use Student document ID for API consistency
+      _id: s._id, // Also include _id for compatibility
+      userId: s.userId, // Include userId for reference
       roll_number: s.rollNumber,
+      rollNumber: s.rollNumber, // Include both formats
       full_name: s.name,
+      name: s.name, // Include both formats
       email: s.email,
       mobile_number: s.mobile || '',
+      mobile: s.mobile || '', // Include both formats
       department: s.department,
       batch: s.batch,
       year: yearNumber,
@@ -176,6 +181,26 @@ router.post('/', [
     }
     if (!password) {
       return res.status(400).json({ success: false, message: 'Missing password' });
+    }
+
+    // Validate year-semester combination
+    const yearNumber = parseYearNumber(normalizedYear);
+    const semesterNumber = parseSemesterNumber(normalizedSemester);
+    
+    if (yearNumber && semesterNumber) {
+      const validSemesters = {
+        1: [1, 2],
+        2: [3, 4],
+        3: [5, 6],
+        4: [7, 8]
+      };
+      
+      if (!validSemesters[yearNumber] || !validSemesters[yearNumber].includes(semesterNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid year-semester combination. Please select valid semester for the chosen year.'
+        });
+      }
     }
 
     // Verify authorization: must be class advisor for this batch/year/semester
@@ -245,8 +270,6 @@ router.post('/', [
     });
     await student.save();
 
-    const yearNumber = parseYearNumber(normalizedYear);
-    const semesterNumber = parseSemesterNumber(normalizedSemester);
     const response = {
       id: student._id,
       roll_number: student.rollNumber,
@@ -582,7 +605,140 @@ router.get('/class/:classAssigned', async (req, res) => {
 });
 
 
-// @desc    Update student
+// @desc    Update student details (comprehensive)
+// @route   PUT /api/students/:id
+// @access  Faculty and above
+router.put('/:id', [
+  body('rollNumber').notEmpty().withMessage('Roll number is required'),
+  body('name').notEmpty().trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
+  body('mobile').isLength({ min: 10, max: 10 }).withMessage('Mobile number must be 10 digits'),
+  body('batch').notEmpty().withMessage('Batch is required'),
+  body('year').notEmpty().withMessage('Year is required'),
+  body('semester').notEmpty().withMessage('Semester is required'),
+  body('section').optional().trim()
+], async (req, res) => {
+  try {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { rollNumber, name, email, mobile, batch, year, semester, section } = req.body;
+    const currentUser = req.user;
+
+    // Find the student
+    const student = await Student.findById(req.params.id).populate('userId');
+    if (!student) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Student not found'
+      });
+    }
+
+    // Check if roll number is being changed and if it already exists in the same class
+    if (rollNumber !== student.rollNumber) {
+      const existingStudent = await Student.findOne({
+        rollNumber: rollNumber.trim(),
+        batch,
+        year: normalizeYear(year),
+        semester: normalizeSemester(semester),
+        department: currentUser.department,
+        _id: { $ne: req.params.id }
+      });
+
+      if (existingStudent) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Roll number already exists in this class'
+        });
+      }
+    }
+
+    // Check if email is being changed and if it already exists
+    if (email !== student.userId.email) {
+      const existingUser = await User.findOne({
+        email: email.toLowerCase(),
+        _id: { $ne: student.userId._id }
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Email already exists'
+        });
+      }
+    }
+
+    // Update User model
+    const updatedUser = await User.findByIdAndUpdate(
+      student.userId._id,
+      {
+        name: name.trim(),
+        email: email.toLowerCase(),
+        mobile: mobile.trim()
+      },
+      { new: true, runValidators: true }
+    );
+
+    // Update Student model
+    const updatedStudent = await Student.findByIdAndUpdate(
+      req.params.id,
+      {
+        rollNumber: rollNumber.trim(),
+        batch: batch.trim(),
+        year: normalizeYear(year),
+        semester: normalizeSemester(semester),
+        section: section ? section.trim() : undefined,
+        mobile: mobile.trim()
+      },
+      { new: true, runValidators: true }
+    ).populate('userId', 'name email mobile');
+
+    console.log('✅ Student updated successfully:', {
+      studentId: updatedStudent._id,
+      rollNumber: updatedStudent.rollNumber,
+      name: updatedUser.name,
+      email: updatedUser.email
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Student updated successfully',
+      data: {
+        _id: updatedStudent._id,
+        rollNumber: updatedStudent.rollNumber,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        mobile: updatedUser.mobile,
+        batch: updatedStudent.batch,
+        year: updatedStudent.year,
+        semester: updatedStudent.semester,
+        section: updatedStudent.section,
+        userId: {
+          _id: updatedUser._id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          mobile: updatedUser.mobile
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Update student error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update student',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Update student (legacy endpoint)
 // @route   PUT /api/student/update/:id
 // @access  Faculty and above
 router.put('/update/:id', [
@@ -975,24 +1131,45 @@ router.get('/:id/profile', authenticate, async (req, res) => {
 
     // Get holidays in the same date range to exclude from working days
     const Holiday = (await import('../models/Holiday.js')).default;
+    
+    // Convert dateFilter to string format for holiday queries
+    let holidayDateFilter = {};
+    if (startDate && endDate) {
+      const start = new Date(startDate).toISOString().split('T')[0];
+      const end = new Date(endDate).toISOString().split('T')[0];
+      holidayDateFilter = { $gte: start, $lte: end };
+    } else {
+      // Default to current academic year if no date range provided
+      const currentYear = new Date().getFullYear();
+      const academicYearStart = `${currentYear}-08-01`; // August 1st
+      const academicYearEnd = `${currentYear + 1}-07-31`; // July 31st next year
+      holidayDateFilter = { $gte: academicYearStart, $lte: academicYearEnd };
+    }
+    
     const holidays = await Holiday.find({
       department: student.department,
-      holidayDate: dateFilter,
+      holidayDate: holidayDateFilter,
       isActive: true
     }).select('holidayDate reason');
 
     // Create a set of holiday dates for quick lookup
-    const holidayDates = new Set(holidays.map(h => h.holidayDate.toISOString().split('T')[0]));
+    const holidayDates = new Set(holidays.map(h => 
+      typeof h.holidayDate === 'string' ? h.holidayDate : h.holidayDate.toISOString().split('T')[0]
+    ));
 
-    // Calculate attendance statistics (excluding holidays)
+    // Calculate attendance statistics (excluding holidays and "Not Marked" days)
     const workingDaysRecords = attendanceRecords.filter(record => {
       const recordDate = record.date.toISOString().split('T')[0];
-      return !holidayDates.has(recordDate);
+      return !holidayDates.has(recordDate) && record.status !== 'Not Marked';
     });
 
     const totalDays = workingDaysRecords.length;
     const presentDays = workingDaysRecords.filter(record => record.status === 'Present').length;
     const absentDays = workingDaysRecords.filter(record => record.status === 'Absent').length;
+    const notMarkedDays = attendanceRecords.filter(record => {
+      const recordDate = record.date.toISOString().split('T')[0];
+      return !holidayDates.has(recordDate) && record.status === 'Not Marked';
+    }).length;
     const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
 
     // Group attendance by month for calendar view (including holidays)
@@ -1014,12 +1191,14 @@ router.get('/:id/profile', authenticate, async (req, res) => {
 
     // Add holidays to monthly attendance
     holidays.forEach(holiday => {
-      const monthKey = holiday.holidayDate.toISOString().slice(0, 7);
+      // Handle both string and Date formats
+      const holidayDateStr = typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0];
+      const monthKey = holidayDateStr.slice(0, 7); // Extract YYYY-MM
       if (!monthlyAttendance[monthKey]) {
         monthlyAttendance[monthKey] = [];
       }
       monthlyAttendance[monthKey].push({
-        date: holiday.holidayDate.toISOString().split('T')[0],
+        date: holidayDateStr,
         status: 'Holiday',
         reason: holiday.reason,
         actionTaken: ''
@@ -1054,6 +1233,7 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           totalDays,
           presentDays,
           absentDays,
+          notMarkedDays,
           attendancePercentage
         },
         // Monthly attendance data for calendar

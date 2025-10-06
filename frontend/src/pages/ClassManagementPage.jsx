@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Toast from '../components/Toast';
 import { apiFetch } from '../utils/apiFetch';
+import EditStudentModal from '../components/EditStudentModal';
 
 const ClassManagementPage = () => {
   const { user, logout } = useAuth();
@@ -17,6 +18,8 @@ const ClassManagementPage = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [availableBatches, setAvailableBatches] = useState([]);
   const [facultyProfile, setFacultyProfile] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredStudents, setFilteredStudents] = useState([]);
 
   const years = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
 
@@ -30,10 +33,7 @@ const ClassManagementPage = () => {
     try {
       const response = await apiFetch({
         url: `/api/faculty/profile/${user.id}`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'GET'
       });
       
       if (response.data.success) {
@@ -60,10 +60,7 @@ const ClassManagementPage = () => {
     try {
       const response = await apiFetch({
         url: '/api/faculty/batch-ranges',
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'GET'
       });
       
       if (response.data.success) {
@@ -81,15 +78,16 @@ const ClassManagementPage = () => {
     try {
       const response = await apiFetch({
         url: `/api/faculty/students?batch=${selectedBatch}&year=${selectedYear}`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'GET'
       });
       
       if (response.data.success) {
-        setStudents(response.data.data.students || []);
+        const students = response.data.data.students || [];
+        console.log('📋 Class Management fetched students:', students);
+        console.log('📋 Student IDs in fetched data:', students.map(s => ({ _id: s._id, id: s.id, rollNumber: s.rollNumber })));
+        setStudents(students);
       } else {
+        console.log('❌ Class Management failed to fetch students:', response.data.message);
         setStudents([]);
       }
     } catch (error) {
@@ -111,6 +109,33 @@ const ClassManagementPage = () => {
     }
   }, [selectedBatch, selectedYear]);
 
+  // Real-time search filtering - only roll number and name
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredStudents(students);
+    } else {
+      const filtered = students.filter(student => {
+        const searchLower = searchTerm.toLowerCase().trim();
+        const searchTermTrimmed = searchTerm.trim();
+        
+        // Helper function to safely convert to string and lowercase
+        const safeToLower = (value) => {
+          if (value === null || value === undefined) return '';
+          return String(value).toLowerCase();
+        };
+        
+        // Only search by roll number and name
+        const rollNumberMatch = student.rollNumber === searchTermTrimmed || 
+                               safeToLower(student.rollNumber).includes(searchLower);
+        
+        const nameMatch = safeToLower(student.name).includes(searchLower);
+        
+        return rollNumberMatch || nameMatch;
+      });
+      setFilteredStudents(filtered);
+    }
+  }, [searchTerm, students]);
+
   const handleDeleteStudent = async (studentId) => {
     if (!window.confirm('Are you sure you want to delete this student?')) {
       return;
@@ -119,19 +144,30 @@ const ClassManagementPage = () => {
     try {
       const response = await apiFetch({
         url: `/api/faculty/students/${studentId}`,
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'DELETE'
       });
 
       if (response.data.success) {
+        // Remove student from local state immediately for instant UI feedback
+        setStudents(prevStudents => 
+          prevStudents.filter(student => student._id !== studentId && student.id !== studentId)
+        );
+        console.log('✅ Class Management local state updated - student removed');
+        
         setToast({
           show: true,
           message: 'Student deleted successfully.',
           type: 'success'
         });
-        fetchStudents(); // Refresh the list
+        
+        // Refresh from server to ensure data consistency (in background)
+        try {
+          await fetchStudents();
+          console.log('✅ Class Management server data refreshed after deletion');
+        } catch (error) {
+          console.error('❌ Error refreshing from server:', error);
+          // Don't show error to user since local state is already updated
+        }
       } else {
         setToast({
           show: true,
@@ -154,25 +190,90 @@ const ClassManagementPage = () => {
     setShowEditModal(true);
   };
 
-  const handleStudentCreated = () => {
+  const handleStudentCreated = async (newStudentData) => {
+    console.log('📝 Student created in Class Management:', newStudentData);
+    
+    // Close modal first
     setShowAddModal(false);
-    fetchStudents(); // Refresh the list
+    
+    // Add the new student to local state immediately for instant UI feedback
+    if (newStudentData) {
+      setStudents(prevStudents => [...prevStudents, newStudentData]);
+      console.log('✅ Class Management local state updated with new student');
+    }
+    
+    // Show success message
     setToast({
       show: true,
       message: 'Student created successfully.',
       type: 'success'
     });
+    
+    // Refresh from server to ensure data consistency (in background)
+    try {
+      await fetchStudents();
+      console.log('✅ Class Management server data refreshed after creation');
+    } catch (error) {
+      console.error('❌ Error refreshing from server:', error);
+      // Don't show error to user since local state is already updated
+    }
   };
 
-  const handleStudentUpdated = () => {
+  const handleStudentUpdated = async (updatedStudentData) => {
+    console.log('📝 Student updated in Class Management:', updatedStudentData);
+    console.log('📝 Current students before update:', students);
+    
+    // Close modal first
     setShowEditModal(false);
     setEditingStudent(null);
-    fetchStudents(); // Refresh the list
+    
+    // Update the local state immediately for instant UI feedback
+    if (updatedStudentData) {
+      setStudents(prevStudents => {
+        console.log('📝 Previous students:', prevStudents);
+        const updatedStudents = prevStudents.map(student => {
+          console.log('📝 Checking student:', student._id, 'vs', updatedStudentData._id);
+          const isMatch = student._id === updatedStudentData._id || student.id === updatedStudentData._id;
+          console.log('📝 Is match:', isMatch);
+          
+          if (isMatch) {
+            const updatedStudent = {
+              ...student,
+              rollNumber: updatedStudentData.rollNumber,
+              name: updatedStudentData.name,
+              email: updatedStudentData.email,
+              mobile: updatedStudentData.mobile,
+              batch: updatedStudentData.batch,
+              year: updatedStudentData.year,
+              semester: updatedStudentData.semester,
+              section: updatedStudentData.section
+            };
+            console.log('📝 Updated student:', updatedStudent);
+            return updatedStudent;
+          }
+          return student;
+        });
+        console.log('📝 Final updated students:', updatedStudents);
+        return updatedStudents;
+      });
+      console.log('✅ Class Management local state updated immediately');
+    }
+    
+    // Show success message
     setToast({
       show: true,
       message: 'Student updated successfully.',
       type: 'success'
     });
+    
+    // Refresh from server to ensure data consistency (in background)
+    try {
+      await fetchStudents();
+      console.log('✅ Class Management server data refreshed');
+    } catch (error) {
+      console.error('❌ Error refreshing from server:', error);
+      // Don't show error to user since local state is already updated
+    }
   };
 
   // Check if faculty is class advisor
@@ -276,15 +377,62 @@ const ClassManagementPage = () => {
               </button>
             </div>
 
+            {/* Search Bar */}
+            <div className="mb-6">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search students by roll number or name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {searchTerm && (
+                <p className="mt-2 text-sm text-gray-600">
+                  {filteredStudents.length} result{filteredStudents.length !== 1 ? 's' : ''} found for "{searchTerm}"
+                </p>
+              )}
+            </div>
+
             {loading ? (
               <div className="flex items-center justify-center h-32">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               </div>
             ) : (
               <>
-                {students.length === 0 ? (
+                {filteredStudents.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-500">No students found for this batch and year.</p>
+                    {searchTerm ? (
+                      <div>
+                        <div className="text-6xl mb-4">🔍</div>
+                        <p className="text-gray-500 text-lg">No results found for "{searchTerm}"</p>
+                        <p className="text-gray-400 text-sm mt-2">Try searching with different keywords or clear the search</p>
+                        <button
+                          onClick={() => setSearchTerm('')}
+                          className="mt-4 text-blue-600 hover:text-blue-800 underline"
+                        >
+                          Clear search
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No students found for this batch and year.</p>
+                    )}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -309,7 +457,7 @@ const ClassManagementPage = () => {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {students.map((student) => (
+                        {filteredStudents.map((student) => (
                           <tr key={student._id} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               {student.rollNumber}
@@ -463,14 +611,12 @@ const AddStudentModal = ({ isOpen, onClose, onStudentCreated, batch, year, depar
           batch,
           year,
           department
-        },
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
       });
 
       if (response.data.success) {
-        onStudentCreated();
+        // Pass the created student data to the callback
+        onStudentCreated(response.data.data);
         setFormData({
           rollNumber: '',
           name: '',
@@ -631,239 +777,6 @@ const AddStudentModal = ({ isOpen, onClose, onStudentCreated, batch, year, depar
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 {loading ? 'Creating...' : 'Create Student'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Edit Student Modal Component
-const EditStudentModal = ({ isOpen, onClose, onStudentUpdated, student }) => {
-  const [formData, setFormData] = useState({
-    name: student?.name || '',
-    email: student?.email || '',
-    mobile: student?.mobile || '',
-    password: ''
-  });
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    
-    if (errors[name]) {
-      setErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required';
-    }
-
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email';
-    }
-
-    if (!formData.mobile.trim()) {
-      newErrors.mobile = 'Mobile number is required';
-    } else if (!/^[0-9]{10}$/.test(formData.mobile)) {
-      newErrors.mobile = 'Mobile number must be exactly 10 digits';
-    }
-
-    if (formData.password && formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const updateData = {
-        name: formData.name,
-        email: formData.email,
-        mobile: formData.mobile
-      };
-
-      // Only include password if it's provided
-      if (formData.password) {
-        updateData.password = formData.password;
-      }
-
-      const response = await apiFetch({
-        url: `/api/faculty/students/${student._id}`,
-        method: 'PUT',
-        data: updateData,
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
-      });
-
-      if (response.data.success) {
-        onStudentUpdated();
-      }
-    } catch (error) {
-      console.error('Error updating student:', error);
-      if (error.response?.data?.message) {
-        setErrors({ general: error.response.data.message });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[95vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Edit Student</h2>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-2xl"
-            >
-              ×
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {errors.general && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                {errors.general}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Roll Number
-              </label>
-              <input
-                type="text"
-                value={student?.rollNumber || ''}
-                disabled
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">Roll number cannot be changed</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Full Name *
-              </label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleInputChange}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.name ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="Enter full name"
-              />
-              {errors.name && (
-                <p className="text-red-500 text-sm mt-1">{errors.name}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email *
-              </label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.email ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="Enter email address"
-              />
-              {errors.email && (
-                <p className="text-red-500 text-sm mt-1">{errors.email}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Mobile Number *
-              </label>
-              <input
-                type="tel"
-                name="mobile"
-                value={formData.mobile}
-                onChange={handleInputChange}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.mobile ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="Enter mobile number (10 digits)"
-                maxLength="10"
-              />
-              {errors.mobile && (
-                <p className="text-red-500 text-sm mt-1">{errors.mobile}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                New Password (Optional)
-              </label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleInputChange}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.password ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="Enter new password (leave blank to keep current)"
-              />
-              {errors.password && (
-                <p className="text-red-500 text-sm mt-1">{errors.password}</p>
-              )}
-              <p className="text-xs text-gray-500 mt-1">Leave blank to keep current password</p>
-            </div>
-
-            <div className="flex justify-end space-x-3 pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-                disabled={loading}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {loading ? 'Updating...' : 'Update Student'}
               </button>
             </div>
           </form>

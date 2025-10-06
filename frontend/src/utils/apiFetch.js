@@ -10,6 +10,12 @@ export const apiFetch = async (options) => {
     headers = {},
   } = options;
 
+  // Automatically add Authorization header if access token exists
+  const accessToken = localStorage.getItem('accessToken');
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
   try {
     const res = await axios({ url, method, data, headers });
     return res;

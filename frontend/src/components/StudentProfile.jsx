@@ -51,6 +51,7 @@ const StudentProfile = () => {
     switch (status) {
       case 'Present': return 'text-green-600 bg-green-100';
       case 'Absent': return 'text-red-600 bg-red-100';
+      case 'Not Marked': return 'text-yellow-600 bg-yellow-100';
       case 'Holiday': return 'text-yellow-600 bg-yellow-100';
       default: return 'text-gray-600 bg-gray-100';
     }
@@ -60,6 +61,7 @@ const StudentProfile = () => {
     switch (status) {
       case 'Present': return '✅';
       case 'Absent': return '❌';
+      case 'Not Marked': return '❔';
       case 'Holiday': return '🎉';
       default: return '⚪';
     }
@@ -248,6 +250,14 @@ const StudentProfile = () => {
                       <span className="font-medium text-red-800">Days Absent</span>
                     </div>
                     <span className="text-2xl font-bold text-red-600">{attendanceStats.absentDays}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-yellow-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">❔</span>
+                      <span className="font-medium text-yellow-800">Not Marked</span>
+                    </div>
+                    <span className="text-2xl font-bold text-yellow-600">{attendanceStats.notMarkedDays || 0}</span>
                   </div>
                   
                   <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">

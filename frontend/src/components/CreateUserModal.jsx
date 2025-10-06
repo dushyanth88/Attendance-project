@@ -31,8 +31,18 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
   const departments = ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'];
   const positions = ['Assistant Professor', 'Associate Professor', 'Professor'];
   const years = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
-  const semesters = [1, 2, 3, 4, 5, 6, 7, 8];
   const sections = ['A', 'B', 'C'];
+  
+  // Dynamic semester mapping based on year
+  const semesterOptions = {
+    "1st Year": [1, 2],
+    "2nd Year": [3, 4],
+    "3rd Year": [5, 6],
+    "4th Year": [7, 8]
+  };
+  
+  // State for dynamic semester filtering
+  const [availableSemesters, setAvailableSemesters] = useState([]);
 
   // Fetch available batches when modal opens
   useEffect(() => {
@@ -62,6 +72,20 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
       console.error('HOD auth test failed:', error);
     }
   };
+
+  // Update available semesters when year changes
+  useEffect(() => {
+    if (formData.year && semesterOptions[formData.year]) {
+      setAvailableSemesters(semesterOptions[formData.year]);
+      // Reset semester if current selection is not valid for new year
+      if (formData.semester && !semesterOptions[formData.year].includes(parseInt(formData.semester))) {
+        setFormData(prev => ({ ...prev, semester: '' }));
+      }
+    } else {
+      setAvailableSemesters([]);
+      setFormData(prev => ({ ...prev, semester: '' }));
+    }
+  }, [formData.year]);
 
   // Check advisor availability when relevant fields change
   useEffect(() => {
@@ -323,6 +347,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
           semester: '',
           section: ''
         });
+        setAvailableSemesters([]);
         
         // Call the callback to trigger refresh
         if (onUserCreated) {
@@ -375,6 +400,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
       section: ''
     });
     setErrors({});
+    setAvailableSemesters([]);
     onClose();
   };
 
@@ -664,17 +690,25 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                           name="semester"
                           value={formData.semester}
                           onChange={handleInputChange}
+                          disabled={!availableSemesters.length}
                           className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
                             errors.semester ? 'border-red-500' : 'border-gray-300'
-                          }`}
+                          } ${!availableSemesters.length ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                         >
-                          <option value="">Select Semester</option>
-                          {semesters.map(semester => (
+                          <option value="">
+                            {!availableSemesters.length ? 'Select Year First' : 'Select Semester'}
+                          </option>
+                          {availableSemesters.map(semester => (
                             <option key={semester} value={semester}>Semester {semester}</option>
                           ))}
                         </select>
                         {errors.semester && (
                           <p className="text-red-500 text-xs mt-1">{errors.semester}</p>
+                        )}
+                        {!availableSemesters.length && formData.year && (
+                          <p className="text-blue-600 text-xs mt-1">
+                            Please select a year to see available semesters
+                          </p>
                         )}
                       </div>
                     </div>

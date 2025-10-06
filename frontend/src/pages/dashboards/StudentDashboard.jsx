@@ -139,8 +139,20 @@ const StudentDashboard = () => {
               <span className="text-3xl mr-3">📅</span>
               <h3 className="text-lg font-semibold">Today's Status</h3>
             </div>
-            <div className={`p-4 rounded-lg ${todayStatus === 'Present' ? 'bg-green-50 border-l-4 border-green-500' : todayStatus === 'Absent' ? 'bg-red-50 border-l-4 border-red-500' : 'bg-gray-50 border'}`}>
-              <p className="font-medium">{todayStatus === '-' ? 'No record for today' : todayStatus}</p>
+            <div className={`p-4 rounded-lg ${
+              todayStatus === 'Present' ? 'bg-green-50 border-l-4 border-green-500' : 
+              todayStatus === 'Absent' ? 'bg-red-50 border-l-4 border-red-500' : 
+              todayStatus === 'Not Marked' ? 'bg-yellow-50 border-l-4 border-yellow-500' : 
+              'bg-gray-50 border'
+            }`}>
+              <p className="font-medium">
+                {todayStatus === '-' ? 'No record for today' : 
+                 todayStatus === 'Not Marked' ? '❔ Not Marked' : 
+                 todayStatus}
+              </p>
+              {todayStatus === 'Not Marked' && (
+                <p className="text-sm text-yellow-700 mt-1">Attendance not yet recorded by faculty</p>
+              )}
             </div>
           </div>
 
@@ -205,7 +217,14 @@ const StudentDashboard = () => {
                   <div>
                     <p className="font-medium">{rec.date}</p>
                   </div>
-                  <span className={`${rec.status === 'Present' ? 'text-green-600' : 'text-red-600'} font-semibold`}>{rec.status}</span>
+                  <span className={`${
+                    rec.status === 'Present' ? 'text-green-600' : 
+                    rec.status === 'Absent' ? 'text-red-600' : 
+                    rec.status === 'Not Marked' ? 'text-yellow-600' : 
+                    'text-gray-600'
+                  } font-semibold`}>
+                    {rec.status === 'Not Marked' ? '❔ Not Marked' : rec.status}
+                  </span>
                 </div>
               ))}
             </div>

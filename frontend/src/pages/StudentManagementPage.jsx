@@ -23,16 +23,14 @@ const StudentManagementPage = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredStudents, setFilteredStudents] = useState([]);
 
   const fetchFacultyProfile = async () => {
     if (!user?.id) return;
     
     try {
-      const response = await fetch(`/api/faculty/profile/${user.id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
-      });
+      const response = await fetch(`/api/faculty/profile/${user.id}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -56,21 +54,31 @@ const StudentManagementPage = () => {
     try {
       const response = await apiFetch({
         url: `/api/students?batch=${batch}&year=${year}&semester=${semester}`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'GET'
       });
       
       if (response.data.success) {
         const list = response.data.data.students || [];
+        console.log('📋 Fetched students from API:', list);
         const normalized = list.map(s => ({
-          id: s.id || s._id,
+          id: s.id || s._id, // This should now be the Student document ID
+          _id: s._id, // Include _id for compatibility
           rollNumber: s.roll_number || s.rollNumber,
           name: s.full_name || s.name,
           email: s.email,
-          mobile: s.mobile_number || s.mobile
+          mobile: s.mobile_number || s.mobile,
+          batch: s.batch || batch,
+          year: s.year || year,
+          semester: s.semester || semester,
+          section: s.section || '',
+          userId: s.userId || {
+            _id: s.userId,
+            name: s.full_name || s.name,
+            email: s.email,
+            mobile: s.mobile_number || s.mobile
+          }
         }));
+        console.log('📋 Normalized students:', normalized);
         setStudents(normalized);
       } else {
         setToast({ 
@@ -81,9 +89,24 @@ const StudentManagementPage = () => {
       }
     } catch (error) {
       console.error('Error fetching students:', error);
+      
+      let errorMessage = 'Unable to fetch students. Please try again.';
+      
+      if (error.response?.status === 401) {
+        errorMessage = 'Authentication failed. Please log in again.';
+        // Optionally redirect to login or refresh the page
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Access denied. You do not have permission to view students.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Students not found for this class.';
+      }
+      
       setToast({ 
         show: true, 
-        message: 'Unable to fetch students. Please try again.', 
+        message: errorMessage, 
         type: 'error' 
       });
     } finally {
@@ -101,20 +124,65 @@ const StudentManagementPage = () => {
     fetchStudents();
   }, [fetchStudents]);
 
+  // Real-time search filtering - only roll number and name
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredStudents(students);
+    } else {
+      const filtered = students.filter(student => {
+        const searchLower = searchTerm.toLowerCase().trim();
+        const searchTermTrimmed = searchTerm.trim();
+        
+        // Helper function to safely convert to string and lowercase
+        const safeToLower = (value) => {
+          if (value === null || value === undefined) return '';
+          return String(value).toLowerCase();
+        };
+        
+        // Only search by roll number and name
+        const rollNumberMatch = student.rollNumber === searchTermTrimmed || 
+                               safeToLower(student.rollNumber).includes(searchLower);
+        
+        const nameMatch = safeToLower(student.name).includes(searchLower);
+        
+        return rollNumberMatch || nameMatch;
+      });
+      setFilteredStudents(filtered);
+    }
+  }, [searchTerm, students]);
+
   const handleStudentCreated = () => {
     setRefreshTrigger(prev => prev + 1);
     setShowAddModal(false);
     setToast({ show: true, message: 'Student added successfully!', type: 'success' });
   };
 
-  const handleStudentUpdated = () => {
-    setRefreshTrigger(prev => prev + 1);
+  const handleStudentUpdated = async (updatedStudentData) => {
+    console.log('📝 Student updated with data:', updatedStudentData);
+    
+    // Close modal first
     setShowEditModal(false);
     setEditingStudent(null);
+    
+    // Show success message
     setToast({ show: true, message: 'Student updated successfully!', type: 'success' });
+    
+    // Refresh the student list to show updated data
+    try {
+      await fetchStudents();
+      console.log('✅ Student list refreshed after update');
+    } catch (error) {
+      console.error('❌ Error refreshing student list:', error);
+      setToast({ 
+        show: true, 
+        message: 'Student updated but failed to refresh list. Please refresh the page.', 
+        type: 'warning' 
+      });
+    }
   };
 
   const handleEditStudent = (student) => {
+    console.log('📝 Editing student with data:', student);
     setEditingStudent(student);
     setShowEditModal(true);
   };
@@ -127,10 +195,7 @@ const StudentManagementPage = () => {
     try {
       const response = await apiFetch({
         url: `/api/students/${studentId}`,
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-        }
+        method: 'DELETE'
       });
       
       if (response.data.success) {
@@ -256,9 +321,44 @@ const StudentManagementPage = () => {
         ) : (
           <div className="bg-white shadow-md rounded-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">
-                Students ({students.length})
-              </h3>
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Students ({students.length})
+                </h3>
+              </div>
+              
+              {/* Search Bar */}
+              <div className="mt-4">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search students by roll number or name..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                    >
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {searchTerm && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    {filteredStudents.length} result{filteredStudents.length !== 1 ? 's' : ''} found for "{searchTerm}"
+                  </p>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
@@ -282,7 +382,24 @@ const StudentManagementPage = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {students.map((student) => (
+                  {filteredStudents.length === 0 && searchTerm ? (
+                    <tr>
+                      <td colSpan="5" className="px-6 py-12 text-center">
+                        <div>
+                          <div className="text-6xl mb-4">🔍</div>
+                          <p className="text-gray-500 text-lg">No results found for "{searchTerm}"</p>
+                          <p className="text-gray-400 text-sm mt-2">Try searching with different keywords or clear the search</p>
+                          <button
+                            onClick={() => setSearchTerm('')}
+                            className="mt-4 text-blue-600 hover:text-blue-800 underline"
+                          >
+                            Clear search
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStudents.map((student) => (
                     <tr key={student.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {student.rollNumber}
@@ -324,7 +441,8 @@ const StudentManagementPage = () => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Holiday from '../models/Holiday.js';
 import { authenticate, facultyAndAbove } from '../middleware/auth.js';
+import { normalizeDateToString, isValidDateString } from '../utils/dateUtils.js';
 
 const router = express.Router();
 
@@ -29,15 +30,22 @@ router.post('/', [
     const { date, reason } = req.body;
     const currentUser = req.user;
 
-    // Normalize date to remove time component
-    const holidayDate = new Date(date);
-    holidayDate.setHours(0, 0, 0, 0);
+    // Validate and normalize date to YYYY-MM-DD format
+    let holidayDateString;
+    try {
+      holidayDateString = normalizeDateToString(date);
+    } catch (error) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid date format'
+      });
+    }
 
-    // Check if holiday already exists for this date and department
+    // Check if holiday already exists for this date and department (ignore deleted holidays)
     const existingHoliday = await Holiday.findOne({
-      holidayDate,
+      holidayDate: holidayDateString,
       department: currentUser.department,
-      isActive: true
+      isDeleted: false
     });
 
     if (existingHoliday) {
@@ -49,7 +57,7 @@ router.post('/', [
 
     // Create new holiday
     const holiday = new Holiday({
-      holidayDate,
+      holidayDate: holidayDateString,
       reason,
       createdBy: currentUser._id,
       department: currentUser.department
@@ -68,7 +76,7 @@ router.post('/', [
     }
 
     console.log('🎉 Holiday created:', {
-      date: holidayDate.toISOString().split('T')[0],
+      date: holidayDateString,
       reason,
       department: currentUser.department,
       createdBy: currentUser.name
@@ -79,7 +87,7 @@ router.post('/', [
       message: 'Holiday created successfully',
       data: {
         id: holiday._id,
-        date: holiday.holidayDate.toISOString().split('T')[0],
+        date: holiday.holidayDate,
         reason: holiday.reason,
         department: holiday.department,
         createdBy: currentUser.name,
@@ -107,37 +115,50 @@ router.get('/', async (req, res) => {
     let dateFilter = {};
 
     if (startDate && endDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // Convert to YYYY-MM-DD format for string comparison
+      const start = new Date(startDate).toISOString().split('T')[0];
+      const end = new Date(endDate).toISOString().split('T')[0];
       dateFilter = { $gte: start, $lte: end };
     } else if (year) {
-      const yearStart = new Date(year, 0, 1);
-      const yearEnd = new Date(year, 11, 31);
+      // Convert year to date range strings
+      const yearStart = `${year}-01-01`;
+      const yearEnd = `${year}-12-31`;
       dateFilter = { $gte: yearStart, $lte: yearEnd };
     } else {
       // Default to current year
       const currentYear = new Date().getFullYear();
-      const yearStart = new Date(currentYear, 0, 1);
-      const yearEnd = new Date(currentYear, 11, 31);
+      const yearStart = `${currentYear}-01-01`;
+      const yearEnd = `${currentYear}-12-31`;
       dateFilter = { $gte: yearStart, $lte: yearEnd };
     }
 
     const holidays = await Holiday.find({
       department: currentUser.department,
-      isActive: true,
+      isDeleted: false,
       holidayDate: dateFilter
     })
       .populate('createdBy', 'name')
       .populate('updatedBy', 'name')
       .sort({ holidayDate: 1 });
 
+    console.log('📅 Fetching holidays:', {
+      department: currentUser.department,
+      dateFilter,
+      foundHolidays: holidays.length,
+      holidays: holidays.map(h => ({
+        id: h._id,
+        date: h.holidayDate,
+        reason: h.reason,
+        isDeleted: h.isDeleted,
+        deletedAt: h.deletedAt
+      }))
+    });
+
     res.json({
       status: 'success',
       data: holidays.map(holiday => ({
         id: holiday._id,
-        date: holiday.holidayDate.toISOString().split('T')[0],
+        date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
         reason: holiday.reason,
         createdBy: holiday.createdBy.name,
         updatedBy: holiday.updatedBy?.name || null,
@@ -166,7 +187,7 @@ router.delete('/:id', async (req, res) => {
     const holiday = await Holiday.findOne({
       _id: id,
       department: currentUser.department,
-      isActive: true
+      isDeleted: false
     });
 
     if (!holiday) {
@@ -176,13 +197,17 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    // Soft delete by setting isActive to false
-    holiday.isActive = false;
+    // Soft delete by setting isDeleted to true
+    holiday.isDeleted = true;
+    holiday.deletedAt = new Date();
     await holiday.save();
 
     console.log('🗑️ Holiday deleted:', {
-      date: holiday.holidayDate.toISOString().split('T')[0],
+      id: holiday._id,
+      date: holiday.holidayDate,
       reason: holiday.reason,
+      isDeleted: holiday.isDeleted,
+      deletedAt: holiday.deletedAt,
       deletedBy: currentUser.name
     });
 
@@ -225,7 +250,7 @@ router.put('/:id', [
     const holiday = await Holiday.findOne({
       _id: id,
       department: currentUser.department,
-      isActive: true
+      isDeleted: false
     });
 
     if (!holiday) {
@@ -235,16 +260,24 @@ router.put('/:id', [
       });
     }
 
-    // Normalize date to remove time component
+    // Validate and normalize date to YYYY-MM-DD format
     const newHolidayDate = new Date(date);
-    newHolidayDate.setHours(0, 0, 0, 0);
+    if (isNaN(newHolidayDate.getTime())) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid date format'
+      });
+    }
+    
+    // Convert to YYYY-MM-DD string to avoid timezone issues
+    const newHolidayDateString = newHolidayDate.toISOString().split('T')[0];
 
-    // Check if the new date conflicts with another holiday (excluding current holiday)
+    // Check if the new date conflicts with another holiday (excluding current holiday and deleted holidays)
     const existingHoliday = await Holiday.findOne({
       _id: { $ne: id },
-      holidayDate: newHolidayDate,
+      holidayDate: newHolidayDateString,
       department: currentUser.department,
-      isActive: true
+      isDeleted: false
     });
 
     if (existingHoliday) {
@@ -255,8 +288,8 @@ router.put('/:id', [
     }
 
     // Update the holiday
-    const oldDate = holiday.holidayDate.toISOString().split('T')[0];
-    holiday.holidayDate = newHolidayDate;
+    const oldDate = holiday.holidayDate;
+    holiday.holidayDate = newHolidayDateString;
     holiday.reason = reason;
     holiday.updatedBy = currentUser._id;
 
@@ -265,7 +298,7 @@ router.put('/:id', [
     console.log('✏️ Holiday updated:', {
       id: holiday._id,
       oldDate,
-      newDate: newHolidayDate.toISOString().split('T')[0],
+      newDate: newHolidayDateString,
       reason,
       department: currentUser.department,
       updatedBy: currentUser.name
@@ -276,7 +309,7 @@ router.put('/:id', [
       message: 'Holiday updated successfully',
       data: {
         id: holiday._id,
-        date: holiday.holidayDate.toISOString().split('T')[0],
+        date: holiday.holidayDate,
         reason: holiday.reason,
         department: holiday.department,
         createdBy: holiday.createdBy,
@@ -303,13 +336,21 @@ router.get('/check/:date', async (req, res) => {
     const { date } = req.params;
     const currentUser = req.user;
 
+    // Validate date format and convert to YYYY-MM-DD
     const checkDate = new Date(date);
-    checkDate.setHours(0, 0, 0, 0);
+    if (isNaN(checkDate.getTime())) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid date format'
+      });
+    }
+    
+    const checkDateString = checkDate.toISOString().split('T')[0];
 
     const holiday = await Holiday.findOne({
-      holidayDate: checkDate,
+      holidayDate: checkDateString,
       department: currentUser.department,
-      isActive: true
+      isDeleted: false
     });
 
     res.json({
@@ -318,7 +359,7 @@ router.get('/check/:date', async (req, res) => {
         isHoliday: !!holiday,
         holiday: holiday ? {
           id: holiday._id,
-          date: holiday.holidayDate.toISOString().split('T')[0],
+          date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
           reason: holiday.reason,
           createdBy: holiday.createdBy
         } : null

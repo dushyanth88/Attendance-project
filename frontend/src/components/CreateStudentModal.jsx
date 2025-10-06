@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Toast from './Toast';
 import { apiFetch } from '../utils/apiFetch';
@@ -20,6 +20,30 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
   const departments = ['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS'];
+  
+  // Dynamic semester mapping based on year
+  const semesterOptions = {
+    "1st": ["Sem 1", "Sem 2"],
+    "2nd": ["Sem 3", "Sem 4"],
+    "3rd": ["Sem 5", "Sem 6"],
+    "4th": ["Sem 7", "Sem 8"]
+  };
+  
+  // State for dynamic semester filtering
+  const [availableSemesters, setAvailableSemesters] = useState(semesterOptions["1st"]);
+
+  // Update available semesters when year changes
+  useEffect(() => {
+    if (formData.year && semesterOptions[formData.year]) {
+      setAvailableSemesters(semesterOptions[formData.year]);
+      // Reset semester if current selection is not valid for new year
+      if (formData.semester && !semesterOptions[formData.year].includes(formData.semester)) {
+        setFormData(prev => ({ ...prev, semester: semesterOptions[formData.year][0] }));
+      }
+    } else {
+      setAvailableSemesters([]);
+    }
+  }, [formData.year]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -142,6 +166,7 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
       department: user?.department || ''
     });
     setErrors({});
+    setAvailableSemesters(semesterOptions["1st"]);
     onClose();
   };
 
@@ -327,16 +352,25 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                   name="semester"
                   value={formData.semester}
                   onChange={handleInputChange}
+                  disabled={!availableSemesters.length}
                   className={`w-full px-3 py-2.5 sm:py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px] ${
                     errors.semester ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  } ${!availableSemesters.length ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 >
-                  {['Sem 1','Sem 2','Sem 3','Sem 4','Sem 5','Sem 6','Sem 7','Sem 8'].map(s => (
+                  <option value="">
+                    {!availableSemesters.length ? 'Select Year First' : 'Select Semester'}
+                  </option>
+                  {availableSemesters.map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
                 {errors.semester && (
                   <p className="text-red-500 text-xs sm:text-sm mt-1">{errors.semester}</p>
+                )}
+                {!availableSemesters.length && formData.year && (
+                  <p className="text-blue-600 text-xs mt-1">
+                    Please select a year to see available semesters
+                  </p>
                 )}
               </div>
             </div>

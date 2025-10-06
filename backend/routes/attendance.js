@@ -709,36 +709,68 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
     }
 
     const absentees = Array.isArray(req.body.absentRollNumbers) ? req.body.absentRollNumbers.map(r => String(r).trim()) : [];
+    
     const rollToStudent = new Map(students.map(s => [s.rollNumber, s]));
+    
+    // Validate all provided absent roll numbers exist
     for (const roll of absentees) {
       if (!rollToStudent.has(roll)) {
-        return res.status(400).json({ status: 'error', message: `Invalid absentee roll number: ${roll}` });
+        return res.status(400).json({ status: 'error', message: `Invalid roll number: ${roll}` });
       }
     }
+    
+    // Determine present students (all students not in absentees list)
+    const presentStudents = students.filter(s => !absentees.includes(s.rollNumber));
+    const presentRollNumbers = presentStudents.map(s => s.rollNumber);
 
-    // Upsert attendance records: one per student per date
+    // Upsert attendance records: mark all students (absent and present)
     const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
-    const bulkOps = students.map(s => ({
-      updateOne: {
-        filter: { studentId: s.userId, classId: classKey, date: requestDate },
-        update: {
-          $set: {
-            status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present',
-            facultyId: currentUser._id,
-            date: requestDate,
-            classId: classKey
-          }
-        },
-        upsert: true
-      }
-    }));
+    const bulkOps = [];
+    
+    // Add operations for absent students
+    for (const roll of absentees) {
+      const student = rollToStudent.get(roll);
+      bulkOps.push({
+        updateOne: {
+          filter: { studentId: student.userId, classId: classKey, date: requestDate },
+          update: {
+            $set: {
+              status: 'Absent',
+              facultyId: currentUser._id,
+              date: requestDate,
+              classId: classKey
+            }
+          },
+          upsert: true
+        }
+      });
+    }
+    
+    // Add operations for present students (all others)
+    for (const roll of presentRollNumbers) {
+      const student = rollToStudent.get(roll);
+      bulkOps.push({
+        updateOne: {
+          filter: { studentId: student.userId, classId: classKey, date: requestDate },
+          update: {
+            $set: {
+              status: 'Present',
+              facultyId: currentUser._id,
+              date: requestDate,
+              classId: classKey
+            }
+          },
+          upsert: true
+        }
+      });
+    }
 
     await Attendance.bulkWrite(bulkOps, { ordered: true });
 
-    // Push SSE updates to impacted students
-    for (const s of students) {
-      const status = absentees.includes(s.rollNumber) ? 'Absent' : 'Present';
-      sendAttendanceEvent(String(s.userId), {
+    // Push SSE updates to all students
+    for (const student of students) {
+      const status = absentees.includes(student.rollNumber) ? 'Absent' : 'Present';
+      sendAttendanceEvent(String(student.userId), {
         date: requestDate.toISOString().slice(0, 10),
         status
       });
@@ -751,12 +783,25 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
         classId: classKey,
         date: requestDate,
         absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
+        presentRollNumbers: presentRollNumbers.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
         markedBy: currentUser._id
       },
       { upsert: true }
     );
 
-    return res.status(200).json({ status: 'success', message: 'Attendance saved successfully' });
+    return res.status(200).json({ 
+      status: 'success', 
+      message: 'Attendance saved successfully',
+      data: {
+        marked: {
+          present: presentRollNumbers,
+          absent: absentees
+        },
+        totalStudents: students.length,
+        presentCount: presentRollNumbers.length,
+        absentCount: absentees.length
+      }
+    });
   } catch (error) {
     console.error('Mark students attendance error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to save attendance' });
@@ -843,13 +888,33 @@ router.put('/edit-students', authenticate, facultyAndAbove, [
       });
     }
 
+    // Determine present students (all students not in absentees list)
+    const presentStudents = students.filter(s => !absentees.includes(s.rollNumber));
+    const presentRollNumbers = presentStudents.map(s => s.rollNumber);
+
     await ClassAttendance.findOneAndUpdate(
       { classId: classKey, date: requestDate },
-      { absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)), markedBy: currentUser._id },
+      { 
+        absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)), 
+        presentRollNumbers: presentRollNumbers.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
+        markedBy: currentUser._id 
+      },
       { upsert: true }
     );
 
-    return res.status(200).json({ status: 'success', message: 'Attendance updated successfully' });
+    return res.status(200).json({ 
+      status: 'success', 
+      message: 'Attendance updated successfully',
+      data: {
+        marked: {
+          present: presentRollNumbers,
+          absent: absentees
+        },
+        totalStudents: students.length,
+        presentCount: presentRollNumbers.length,
+        absentCount: absentees.length
+      }
+    });
   } catch (error) {
     console.error('Edit students attendance error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to update attendance' });
@@ -909,7 +974,7 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
     const records = studentsInClass.map(student => ({
       rollNo: student.rollNumber,
       name: student.name,
-      status: attendanceMap.get(student.userId.toString()) || 'Present'
+      status: attendanceMap.get(student.userId.toString()) || 'Not Marked'
     }));
 
     res.status(200).json({ status: 'success', data: { records } });

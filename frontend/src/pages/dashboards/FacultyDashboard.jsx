@@ -19,7 +19,10 @@ const FacultyDashboard = () => {
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  const [attendanceForm, setAttendanceForm] = useState({ date: new Date().toISOString().slice(0,10), absentees: '' });
+  const [attendanceForm, setAttendanceForm] = useState({ 
+    date: new Date().toISOString().slice(0,10), 
+    absentees: '' 
+  });
   const [attendanceToast, setAttendanceToast] = useState({ show: false, message: '', type: 'success' });
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [isHoliday, setIsHoliday] = useState(false);
@@ -27,6 +30,10 @@ const FacultyDashboard = () => {
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0,10));
   const [historyRows, setHistoryRows] = useState([]);
   const [totalStudentsCount, setTotalStudentsCount] = useState(0);
+  const [attendanceMarked, setAttendanceMarked] = useState(false);
+  const [checkingAttendanceStatus, setCheckingAttendanceStatus] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredStudents, setFilteredStudents] = useState([]);
 
   // Fetch student count for the assigned class using Student Management endpoint
   const fetchStudentCount = useCallback(async (classId) => {
@@ -61,6 +68,7 @@ const FacultyDashboard = () => {
         // normalize to view model
         setStudents(list.map(s => ({
           id: s.id,
+          userId: s.userId, // Include userId for profile navigation
           rollNumber: s.roll_number,
           name: s.full_name,
           email: s.email,
@@ -115,6 +123,13 @@ const FacultyDashboard = () => {
     fetchFacultyProfile();
   }, [fetchFacultyProfile]);
 
+  // Check attendance status when faculty profile is loaded and date changes
+  useEffect(() => {
+    if (facultyProfile && attendanceForm.date) {
+      checkAttendanceStatus(attendanceForm.date);
+    }
+  }, [facultyProfile, attendanceForm.date]);
+
   // Check holiday status on mount and when date changes
   useEffect(() => {
     if (attendanceForm.date) {
@@ -130,13 +145,41 @@ const FacultyDashboard = () => {
     fetchStudentsForAdvisor();
   }, [assignedClass, studentRefreshTrigger, fetchStudentCount, fetchStudentsForAdvisor]);
 
+  // Real-time search filtering - only roll number and name
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredStudents(students);
+    } else {
+      const filtered = students.filter(student => {
+        const searchLower = searchTerm.toLowerCase().trim();
+        const searchTermTrimmed = searchTerm.trim();
+        
+        // Helper function to safely convert to string and lowercase
+        const safeToLower = (value) => {
+          if (value === null || value === undefined) return '';
+          return String(value).toLowerCase();
+        };
+        
+        // Only search by roll number and name
+        const rollNumberMatch = student.rollNumber === searchTermTrimmed || 
+                               safeToLower(student.rollNumber).includes(searchLower);
+        
+        const nameMatch = safeToLower(student.name).includes(searchLower);
+        
+        return rollNumberMatch || nameMatch;
+      });
+      setFilteredStudents(filtered);
+    }
+  }, [searchTerm, students]);
+
   const handleAttendanceChange = (e) => {
     const { name, value } = e.target;
     setAttendanceForm(prev => ({ ...prev, [name]: value }));
     
-    // Check holiday status when date changes
+    // Check holiday status and attendance status when date changes
     if (name === 'date') {
       checkHolidayStatus(value);
+      checkAttendanceStatus(value);
     }
   };
 
@@ -161,9 +204,44 @@ const FacultyDashboard = () => {
     }
   };
 
+  const checkAttendanceStatus = async (date) => {
+    if (!facultyProfile?.batch || !facultyProfile?.year || !facultyProfile?.semester) return;
+    
+    setCheckingAttendanceStatus(true);
+    try {
+      const url = `/api/attendance/history-by-class?batch=${encodeURIComponent(facultyProfile.batch)}&year=${encodeURIComponent(facultyProfile.year)}&semester=${encodeURIComponent(facultyProfile.semester)}&date=${encodeURIComponent(date)}${facultyProfile.section ? `&section=${encodeURIComponent(facultyProfile.section)}` : ''}`;
+      const res = await apiFetch({ url });
+      
+      if (res.data?.status === 'success' && res.data?.data?.records) {
+        // Check if any student has been marked (Present or Absent)
+        const hasMarkedStudents = res.data.data.records.some(record => 
+          record.status === 'Present' || record.status === 'Absent'
+        );
+        setAttendanceMarked(hasMarkedStudents);
+      } else {
+        setAttendanceMarked(false);
+      }
+    } catch (error) {
+      console.error('Error checking attendance status:', error);
+      setAttendanceMarked(false);
+    } finally {
+      setCheckingAttendanceStatus(false);
+    }
+  };
+
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
     if (!facultyProfile?.batch || !facultyProfile?.year || !facultyProfile?.semester) return;
+    
+    // Check if attendance has already been marked for this date
+    if (attendanceMarked) {
+      setAttendanceToast({ 
+        show: true, 
+        message: '⚠️ Attendance has already been marked for this date. Please use "Edit Today\'s Attendance" button to make changes.', 
+        type: 'warning' 
+      });
+      return;
+    }
     
     // Check if the selected date is a holiday
     try {
@@ -187,14 +265,14 @@ const FacultyDashboard = () => {
     
     setAttendanceLoading(true);
     try {
-      // Parse roll numbers as strings to preserve leading zeros if any
-      const absentRollNumbers = attendanceForm.absentees
+      // Parse absent roll numbers as strings to preserve leading zeros if any
+      const absentRollNumbers = (attendanceForm.absentees || '')
         .split(',')
         .map(t => t.trim())
         .filter(t => t.length > 0);
       
       const res = await apiFetch({
-        url: '/api/attendance/mark-students',
+        url: '/api/attendance/mark-students', 
         method: 'POST',
         data: { 
           batch: facultyProfile.batch,
@@ -210,11 +288,12 @@ const FacultyDashboard = () => {
         const classInfo = `${facultyProfile.batch} | ${facultyProfile.year} | Semester ${facultyProfile.semester}${facultyProfile.section ? ` | Section ${facultyProfile.section}` : ''}`;
         setAttendanceToast({ 
           show: true, 
-          message: `✅ Attendance marked successfully for ${classInfo} on ${attendanceForm.date}. ${data.data?.absentStudents || 0} students marked absent.`, 
+          message: `✅ Attendance marked successfully for ${classInfo} on ${attendanceForm.date}. ${data.data?.presentCount || 0} present, ${data.data?.absentCount || 0} absent.`, 
           type: 'success' 
         });
-        // Clear the absentees field after successful marking
+        // Clear the attendance field after successful marking and mark as attended
         setAttendanceForm(prev => ({ ...prev, absentees: '' }));
+        setAttendanceMarked(true);
       } else {
         throw new Error(data.message || 'Error saving attendance');
       }
@@ -283,11 +362,11 @@ const FacultyDashboard = () => {
               {/* Class and Date Row */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
-                  <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <input disabled value={assignedClass || ''} className="w-full px-3 py-2 border rounded-lg bg-gray-100" />
+              </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
                   <div className="flex gap-2">
                     <div className="flex-1 relative">
                       <input 
@@ -333,14 +412,29 @@ const FacultyDashboard = () => {
                 </div>
               </div>
               
-              {/* Absent Roll Numbers Row */}
+              {/* Attendance Marking Row */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Absent Roll Numbers (comma-separated)</label>
-                <input type="text" name="absentees" value={attendanceForm.absentees} onChange={handleAttendanceChange} placeholder="e.g., 44, 7" className="w-full px-3 py-2 border rounded-lg" />
+                <input 
+                  type="text" 
+                  name="absentees" 
+                  value={attendanceForm.absentees} 
+                  onChange={handleAttendanceChange} 
+                  placeholder="e.g., 44, 7, 12" 
+                  className="w-full px-3 py-2 border rounded-lg" 
+                />
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-sm text-green-800">
+                  <strong>Note:</strong> Students not listed in absentees will be automatically marked as Present. Leave empty if all students are present.
+                </p>
               </div>
               <div className="flex gap-2">
-                <button type="submit" disabled={attendanceLoading || isHoliday} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  {attendanceLoading ? 'Saving...' : isHoliday ? 'Cannot mark attendance on holiday' : 'Mark Attendance'}
+                <button type="submit" disabled={attendanceLoading || isHoliday || attendanceMarked} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {attendanceLoading ? 'Saving...' : 
+                   isHoliday ? 'Cannot mark attendance on holiday' : 
+                   attendanceMarked ? 'Already Marked - Use Edit Button' : 
+                   'Mark Attendance'}
             </button>
                 <button type="button" onClick={async () => {
                   setAttendanceLoading(true);
@@ -369,7 +463,7 @@ const FacultyDashboard = () => {
                       const classInfo = `${facultyProfile.batch} | ${facultyProfile.year} | Semester ${facultyProfile.semester}${facultyProfile.section ? ` | Section ${facultyProfile.section}` : ''}`;
                       setAttendanceToast({ 
                         show: true, 
-                        message: `✅ Today's attendance updated for ${classInfo}. ${data.data?.absentStudents || 0} students marked absent.`, 
+                        message: `✅ Today's attendance updated for ${classInfo}. ${data.data?.presentCount || 0} present, ${data.data?.absentCount || 0} absent.`, 
                         type: 'success' 
                       });
                     } else {
@@ -381,7 +475,13 @@ const FacultyDashboard = () => {
                   } finally {
                     setAttendanceLoading(false);
                   }
-                }} disabled={attendanceLoading || isHoliday} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isHoliday ? 'Cannot edit on holiday' : 'Edit Today\'s Attendance'}</button>
+                }} disabled={attendanceLoading || isHoliday} className={`w-full px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  attendanceMarked ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-400 text-white cursor-not-allowed'
+                }`}>
+                  {isHoliday ? 'Cannot edit on holiday' : 
+                   attendanceMarked ? '✏️ Edit Today\'s Attendance' : 
+                   'Edit Today\'s Attendance (Not Available)'}
+                </button>
                 </div>
             </form>
               </div>
@@ -535,7 +635,14 @@ const FacultyDashboard = () => {
                     <tr key={`${r.rollNumber || r.rollNo}-${idx}`}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.rollNumber || r.rollNo}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.name}</td>
-                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${r.status === 'Present' ? 'text-green-600' : 'text-red-600'}`}>{r.status}</td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                        r.status === 'Present' ? 'text-green-600' : 
+                        r.status === 'Absent' ? 'text-red-600' : 
+                        r.status === 'Not Marked' ? 'text-yellow-600' : 
+                        'text-gray-600'
+                      }`}>
+                        {r.status === 'Not Marked' ? '❔ Not Marked' : r.status}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -560,6 +667,39 @@ const FacultyDashboard = () => {
               </button>
             </div>
             
+            {/* Search Bar */}
+            <div className="mb-6">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search students by roll number or name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {searchTerm && (
+                <p className="mt-2 text-sm text-gray-600">
+                  {filteredStudents.length} result{filteredStudents.length !== 1 ? 's' : ''} found for "{searchTerm}"
+                </p>
+              )}
+            </div>
+            
             <div className="bg-white rounded-lg shadow-md overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -575,15 +715,33 @@ const FacultyDashboard = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {studentsLoading ? (
                       <tr><td colSpan="5" className="px-6 py-4 text-sm text-gray-500">Loading...</td></tr>
-                    ) : students.length === 0 ? (
-                      <tr><td colSpan="5" className="px-6 py-4 text-sm text-gray-500">No students found.</td></tr>
+                    ) : filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="px-6 py-12 text-center">
+                          {searchTerm ? (
+                            <div>
+                              <div className="text-6xl mb-4">🔍</div>
+                              <p className="text-gray-500 text-lg">No results found for "{searchTerm}"</p>
+                              <p className="text-gray-400 text-sm mt-2">Try searching with different keywords or clear the search</p>
+                              <button
+                                onClick={() => setSearchTerm('')}
+                                className="mt-4 text-blue-600 hover:text-blue-800 underline"
+                              >
+                                Clear search
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-gray-500">No students found.</p>
+                          )}
+                        </td>
+                      </tr>
                     ) : (
-                      students.map(s => (
+                      filteredStudents.map(s => (
                         <tr key={s.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{s.rollNumber}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             <button
-                              onClick={() => navigate(`/student-profile/${s.id}`)}
+                              onClick={() => navigate(`/student-profile/${s.userId}`)}
                               className="text-indigo-600 hover:text-indigo-900 hover:underline font-medium"
                             >
                               {s.name}

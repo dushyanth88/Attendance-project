@@ -2,9 +2,22 @@ import mongoose from 'mongoose';
 
 const holidaySchema = new mongoose.Schema({
   holidayDate: {
-    type: Date,
+    type: mongoose.Schema.Types.Mixed, // Allow both String and Date during migration
     required: [true, 'Holiday date is required'],
-    index: true
+    index: true,
+    validate: {
+      validator: function(v) {
+        // Accept both YYYY-MM-DD string format and Date objects
+        if (typeof v === 'string') {
+          return /^\d{4}-\d{2}-\d{2}$/.test(v);
+        }
+        if (v instanceof Date) {
+          return !isNaN(v.getTime());
+        }
+        return false;
+      },
+      message: 'Holiday date must be in YYYY-MM-DD format or a valid Date'
+    }
   },
   reason: {
     type: String,
@@ -25,9 +38,13 @@ const holidaySchema = new mongoose.Schema({
       message: 'Department must be one of: CSE, IT, ECE, EEE, Civil, Mechanical, CSBS, AIDS'
     }
   },
-  isActive: {
+  isDeleted: {
     type: Boolean,
-    default: true
+    default: false
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -37,18 +54,28 @@ const holidaySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Ensure holiday date has no time component (normalize to midnight)
+// Pre-save hook to normalize dates to YYYY-MM-DD strings
 holidaySchema.pre('save', function(next) {
   if (this.holidayDate instanceof Date) {
-    this.holidayDate.setHours(0, 0, 0, 0);
+    // Convert Date to YYYY-MM-DD string
+    this.holidayDate = this.holidayDate.toISOString().split('T')[0];
+  } else if (typeof this.holidayDate === 'string' && !/^\d{4}-\d{2}-\d{2}$/.test(this.holidayDate)) {
+    // If it's a string but not in YYYY-MM-DD format, try to convert it
+    const date = new Date(this.holidayDate);
+    if (!isNaN(date.getTime())) {
+      this.holidayDate = date.toISOString().split('T')[0];
+    }
   }
   next();
 });
 
 // Index for efficient querying by date range
-holidaySchema.index({ holidayDate: 1, department: 1, isActive: 1 });
+holidaySchema.index({ holidayDate: 1, department: 1, isDeleted: 1 });
 
-// Compound unique index to ensure holiday date is unique within each department
-holidaySchema.index({ holidayDate: 1, department: 1 }, { unique: true });
+// Compound unique index to ensure holiday date is unique within each department (only for non-deleted holidays)
+holidaySchema.index({ holidayDate: 1, department: 1 }, { 
+  unique: true,
+  partialFilterExpression: { isDeleted: false }
+});
 
 export default mongoose.model('Holiday', holidaySchema);
