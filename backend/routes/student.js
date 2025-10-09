@@ -1089,21 +1089,32 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     const currentUser = req.user;
 
     console.log('👤 Fetching student profile for ID:', id);
+    console.log('👤 ID type:', typeof id);
+    console.log('👤 Current user role:', currentUser.role);
 
     // Authorization: students can only access their own data, faculty+ can access any
     if (currentUser.role === 'student' && currentUser._id.toString() !== id) {
       return res.status(403).json({ status: 'error', message: 'Access denied' });
     }
 
-    // Get student basic info
-    const student = await Student.findOne({ userId: id })
+    // Get student basic info - try both Student document ID and User document ID
+    console.log('🔍 Trying to find student by Student ID:', id);
+    let student = await Student.findById(id)
       .populate('userId', 'name email mobile')
       .populate('facultyId', 'name');
+
+    // If not found by Student ID, try by User ID
+    if (!student) {
+      console.log('🔍 Student not found by ID, trying by User ID:', id);
+      student = await Student.findOne({ userId: id })
+        .populate('userId', 'name email mobile')
+        .populate('facultyId', 'name');
+    }
 
     console.log('👤 Student found:', student ? 'Yes' : 'No');
 
     if (!student) {
-      console.log('❌ Student not found for userId:', id);
+      console.log('❌ Student not found for ID:', id);
       return res.status(404).json({ status: 'error', message: 'Student not found' });
     }
 
@@ -1124,8 +1135,10 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     }
 
     // Get attendance records for the student
+    // Use the userId from the student document for attendance queries
+    const studentUserId = student.userId._id;
     const attendanceRecords = await Attendance.find({
-      studentId: id,
+      studentId: studentUserId,
       date: dateFilter
     }).sort({ date: 1 });
 
@@ -1215,7 +1228,8 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       data: {
         // Student basic info
         student: {
-          id: student.userId._id,
+          id: student._id, // Use Student document ID
+          userId: student.userId._id, // Include User document ID for reference
           rollNumber: student.rollNumber,
           name: student.userId.name,
           email: student.userId.email,

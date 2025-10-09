@@ -1,11 +1,34 @@
 import { useAuth } from '../../context/AuthContext';
 import { useEffect, useState } from 'react';
+import ReasonSubmissionModal from '../../components/ReasonSubmissionModal';
 
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
   const [todayStatus, setTodayStatus] = useState('-');
   const [overall, setOverall] = useState('-');
   const [history, setHistory] = useState([]);
+  const [showReasonModal, setShowReasonModal] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+
+  const handleReasonSubmit = (record) => {
+    setSelectedRecord({
+      studentId: user.id,
+      date: record.date,
+      status: record.status
+    });
+    setShowReasonModal(true);
+  };
+
+  const handleReasonSuccess = (updatedData) => {
+    // Update the history with the new reason
+    setHistory(prev => prev.map(record => 
+      record.date === updatedData.date 
+        ? { ...record, reason: updatedData.reason }
+        : record
+    ));
+    setShowReasonModal(false);
+    setSelectedRecord(null);
+  };
 
   useEffect(() => {
     const fetchAttendance = async () => {
@@ -18,7 +41,7 @@ const StudentDashboard = () => {
         if (res.ok && data && Array.isArray(data.attendance)) {
           setHistory(data.attendance);
           setOverall(data.overall_percentage || '-');
-          const today = new Date().toISOString().slice(0,10);
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
           const todayRec = data.attendance.find(a => a.date === today);
           setTodayStatus(todayRec ? todayRec.status : '-');
           
@@ -217,17 +240,32 @@ const StudentDashboard = () => {
               )}
               {history.map((rec, idx) => (
                 <div key={`${rec.date}-${idx}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div>
+                  <div className="flex-1">
                     <p className="font-medium">{rec.date}</p>
+                    {rec.reason && (
+                      <p className="text-sm text-gray-600 mt-1">
+                        <span className="font-medium">Reason:</span> {rec.reason}
+                      </p>
+                    )}
                   </div>
-                  <span className={`${
-                    rec.status === 'Present' ? 'text-green-600' : 
-                    rec.status === 'Absent' ? 'text-red-600' : 
-                    rec.status === 'Not Marked' ? 'text-yellow-600' : 
-                    'text-gray-600'
-                  } font-semibold`}>
-                    {rec.status === 'Not Marked' ? '❔ Not Marked' : rec.status}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className={`${
+                      rec.status === 'Present' ? 'text-green-600' : 
+                      rec.status === 'Absent' ? 'text-red-600' : 
+                      rec.status === 'Not Marked' ? 'text-yellow-600' : 
+                      'text-gray-600'
+                    } font-semibold`}>
+                      {rec.status === 'Not Marked' ? '❔ Not Marked' : rec.status}
+                    </span>
+                    {rec.status === 'Absent' && !rec.reason && (
+                      <button
+                        onClick={() => handleReasonSubmit(rec)}
+                        className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition-colors"
+                      >
+                        📝 Add Reason
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -254,6 +292,14 @@ const StudentDashboard = () => {
           </div>
         </div>
       </main>
+
+      {/* Reason Submission Modal */}
+      <ReasonSubmissionModal
+        isOpen={showReasonModal}
+        onClose={() => setShowReasonModal(false)}
+        attendanceRecord={selectedRecord}
+        onSuccess={handleReasonSuccess}
+      />
     </div>
   );
 };

@@ -93,6 +93,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
         formData.batch && 
         formData.year && 
         formData.semester && 
+        formData.section && 
         formData.department) {
       checkAdvisorAvailability();
     } else {
@@ -103,6 +104,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
     formData.batch,
     formData.year,
     formData.semester,
+    formData.section,
     formData.department
   ]);
 
@@ -118,6 +120,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
           batch: formData.batch,
           year: formData.year,
           semester: formData.semester,
+          section: formData.section, // ✅ Include section in the request
           department: formData.department
         },
         headers: {
@@ -416,7 +419,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
         />
       )}
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[95vh] overflow-y-auto">
           <div className="p-4 sm:p-6">
             <div className="flex justify-between items-center mb-4 sm:mb-6">
               <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 pr-2">
@@ -430,7 +433,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
               </button>
             </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
             {/* User Type */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -631,20 +634,21 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                 </div>
 
                 {formData.is_class_advisor && (
-                  <div className="bg-blue-50 p-4 rounded-lg space-y-4">
-                    <h4 className="font-medium text-blue-900 mb-3">Class Advisor Details</h4>
+                  <div className="bg-blue-50 p-5 rounded-lg space-y-5">
+                    <h4 className="font-medium text-blue-900 mb-4">Class Advisor Details</h4>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* First row: Batch, Year, Semester */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                       {/* Batch */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">
                           Batch *
                         </label>
                         <select
                           name="batch"
                           value={formData.batch}
                           onChange={handleInputChange}
-                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                          className={`w-full px-3 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[44px] ${
                             errors.batch ? 'border-red-500' : 'border-gray-300'
                           }`}
                         >
@@ -659,15 +663,15 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                       </div>
 
                       {/* Year */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">
                           Year *
                         </label>
                         <select
                           name="year"
                           value={formData.year}
                           onChange={handleInputChange}
-                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                          className={`w-full px-3 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[44px] ${
                             errors.year ? 'border-red-500' : 'border-gray-300'
                           }`}
                         >
@@ -682,8 +686,8 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                       </div>
 
                       {/* Semester */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700">
                           Semester *
                         </label>
                         <select
@@ -691,7 +695,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                           value={formData.semester}
                           onChange={handleInputChange}
                           disabled={!availableSemesters.length}
-                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                          className={`w-full px-3 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[44px] ${
                             errors.semester ? 'border-red-500' : 'border-gray-300'
                           } ${!availableSemesters.length ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                         >
@@ -713,16 +717,16 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, userRole = 'admin' })
                       </div>
                     </div>
 
-                    {/* Section - Full width */}
-                    <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {/* Second row: Section */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
                         Section *
                       </label>
                       <select
                         name="section"
                         value={formData.section}
                         onChange={handleInputChange}
-                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                        className={`w-full px-3 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[44px] ${
                           errors.section ? 'border-red-500' : 'border-gray-300'
                         }`}
                       >

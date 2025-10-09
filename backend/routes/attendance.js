@@ -6,6 +6,7 @@ import Student from '../models/Student.js';
 import Faculty from '../models/Faculty.js';
 import { authenticate, facultyAndAbove, hodAndAbove, principalAndAbove, verifyToken } from '../middleware/auth.js';
 import ClassAttendance from '../models/ClassAttendance.js';
+import { getCurrentISTDate, getISTStartOfDay, getISTEndOfDay, getAttendanceDate, createISTExactDateFilter, getCurrentISTTimestamp } from '../utils/istTimezone.js';
 
 const router = express.Router();
 
@@ -144,11 +145,11 @@ router.post('/mark', authenticate, facultyAndAbove, [
     if (!classAssigned) {
       return res.status(400).json({ status: 'error', message: 'classId is required' });
     }
-    // Normalize the date (remove time component)
-    const requestDate = req.body.date ? new Date(req.body.date) : new Date();
-    requestDate.setHours(0, 0, 0, 0);
     
-    console.log('📅 Marking attendance for date:', requestDate.toISOString().split('T')[0]);
+    // Get the attendance date in IST timezone
+    const requestDateString = getAttendanceDate(req.body.date);
+    
+    console.log('📅 Marking attendance for date:', requestDateString);
     const absenteesRaw = req.body.absentRollNumbers ?? req.body.absentees ?? [];
     const absentees = Array.isArray(absenteesRaw) ? absenteesRaw.map(r => String(r).trim()).filter(Boolean) : [];
 
@@ -180,14 +181,14 @@ router.post('/mark', authenticate, facultyAndAbove, [
     }
 
     // Check duplicate attendance: any existing class record or per-student records on the date
-    const existingClass = await ClassAttendance.findOne({ classId: classAssigned, date: requestDate });
+    const existingClass = await ClassAttendance.findOne({ classId: classAssigned, date: requestDateString });
     if (existingClass) {
       return res.status(400).json({ status: 'error', message: 'Attendance already marked. Use Edit Attendance.' });
     }
     const studentIds = students.map(s => s.userId); // Attendance.studentId references User
     const existingCount = await Attendance.countDocuments({
       studentId: { $in: studentIds },
-      date: requestDate
+      date: requestDateString
     });
     if (existingCount > 0) {
       return res.status(400).json({ status: 'error', message: 'Attendance already marked. Use Edit Attendance.' });
@@ -199,8 +200,12 @@ router.post('/mark', authenticate, facultyAndAbove, [
         document: {
           studentId: s.userId,
           facultyId: currentUser._id,
-          date: new Date(requestDate),
-          status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present'
+          date: getISTStartOfDay(requestDateString), // Store IST start of day as UTC Date
+          localDate: requestDateString, // Store IST date string for easier filtering
+          status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present',
+          reason: null, // Initialize as null, students can submit reasons later
+          updatedBy: 'faculty',
+          updatedAt: getCurrentISTTimestamp()
         }
       }
     }));
@@ -208,16 +213,17 @@ router.post('/mark', authenticate, facultyAndAbove, [
     const result = await Attendance.bulkWrite(bulkOps, { ordered: true });
     console.log('✅ Bulk write result:', result);
 
-    // Verify records were created
+    // Verify records were created using IST date range
+    const dateFilter = createISTExactDateFilter(requestDateString);
     const verificationRecords = await Attendance.find({
       studentId: { $in: students.map(s => s.userId) },
-      date: requestDate
+      ...dateFilter
     });
     console.log(`🔍 Verification: Created ${verificationRecords.length} attendance records`);
 
     const classDoc = await ClassAttendance.create({
       classId: classAssigned,
-      date: requestDate,
+      date: requestDateString,
       absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
       markedBy: currentUser._id
     });
@@ -228,7 +234,7 @@ router.post('/mark', authenticate, facultyAndAbove, [
       attendanceId: classDoc._id,
       data: {
         class: classAssigned,
-        date: requestDate.toISOString().split('T')[0],
+        date: requestDateString,
         totalStudents: students.length,
         recordsCreated: verificationRecords.length,
         absentStudents: absentees.length
@@ -256,12 +262,18 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       });
     }
 
-    // Build filter
+    // Build filter using localDate for simpler timezone handling
     const filter = { studentId };
     if (startDate || endDate) {
-      filter.date = {};
-      if (startDate) filter.date.$gte = new Date(startDate);
-      if (endDate) filter.date.$lte = new Date(endDate);
+      filter.localDate = {};
+      if (startDate) {
+        const startDateStr = getAttendanceDate(startDate);
+        filter.localDate.$gte = startDateStr;
+      }
+      if (endDate) {
+        const endDateStr = getAttendanceDate(endDate);
+        filter.localDate.$lte = endDateStr;
+      }
     }
 
     const skip = (page - 1) * limit;
@@ -292,7 +304,13 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       ? Math.round((attendanceStats.presentDays / attendanceStats.totalDays) * 100)
       : 0;
 
-    const attendance = attendanceDocs.map(doc => ({ date: doc.date.toISOString().slice(0, 10), status: doc.status }));
+    const attendance = attendanceDocs.map(doc => ({ 
+      date: typeof doc.date === 'string' ? doc.date : doc.date.toISOString().split('T')[0], 
+      status: doc.status,
+      reason: doc.reason || null,
+      updatedBy: doc.updatedBy || 'faculty',
+      updatedAt: doc.updatedAt
+    }));
 
     // Prefer returning roll number if available
     const studentDoc = await Student.findOne({ userId: studentId });
@@ -305,6 +323,105 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error('Get student attendance error:', error);
+    res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+});
+
+// @desc    Get comprehensive attendance records for a student (including holidays)
+// @route   GET /api/attendance/student/:studentId/comprehensive
+// @access  Faculty and above, or student accessing their own data
+router.get('/student/:studentId/comprehensive', authenticate, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { startDate, endDate, limit = 100 } = req.query;
+
+    if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only view your own attendance'
+      });
+    }
+
+    const filter = { studentId: new mongoose.Types.ObjectId(studentId) };
+    if (startDate || endDate) {
+      filter.localDate = {};
+      if (startDate) {
+        const startDateStr = getAttendanceDate(startDate);
+        filter.localDate.$gte = startDateStr;
+      }
+      if (endDate) {
+        const endDateStr = getAttendanceDate(endDate);
+        filter.localDate.$lte = endDateStr;
+      }
+    }
+
+    const attendanceDocs = await Attendance.find(filter)
+      .populate('facultyId', 'name email')
+      .sort({ date: -1 })
+      .limit(parseInt(limit));
+
+    const studentDoc = await Student.findOne({ userId: studentId });
+    if (!studentDoc) {
+      return res.status(404).json({ status: 'error', message: 'Student not found' });
+    }
+
+    const holidayFilter = { department: studentDoc.department };
+    if (startDate || endDate) {
+      holidayFilter.holidayDate = {};
+      if (startDate) holidayFilter.holidayDate.$gte = startDate;
+      if (endDate) holidayFilter.holidayDate.$lte = endDate;
+    }
+
+    const holidays = await Holiday.find(holidayFilter)
+      .sort({ holidayDate: 1 })
+      .limit(100);
+
+    const attendanceRecords = attendanceDocs.map(doc => ({
+      date: typeof doc.date === 'string' ? doc.date : doc.date.toISOString().split('T')[0],
+      status: doc.status,
+      reason: doc.reason || '',
+      markedBy: doc.facultyId ? doc.facultyId.name : 'System'
+    }));
+
+    const holidayRecords = holidays.map(holiday => ({
+      date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
+      status: 'Holiday',
+      reason: holiday.reason || 'Holiday',
+      markedBy: 'System'
+    }));
+
+    const allRecords = [...attendanceRecords, ...holidayRecords];
+
+    const presentCount = attendanceRecords.filter(r => r.status === 'Present').length;
+    const absentCount = attendanceRecords.filter(r => r.status === 'Absent').length;
+    const totalWorkingDays = presentCount + absentCount;
+    const attendancePercentage = totalWorkingDays > 0 ? Math.round((presentCount / totalWorkingDays) * 100) : 0;
+
+    res.status(200).json({
+      status: 'success',
+      lastUpdated: new Date().toISOString(),
+      data: {
+        student: {
+          id: studentId,
+          rollNumber: studentDoc.rollNumber,
+          name: studentDoc.name,
+          department: studentDoc.department,
+          classAssigned: studentDoc.classAssigned
+        },
+        attendance: {
+          records: allRecords.sort((a, b) => new Date(b.date) - new Date(a.date)),
+          summary: {
+            presentDays: presentCount,
+            absentDays: absentCount,
+            totalWorkingDays: totalWorkingDays,
+            attendancePercentage: attendancePercentage,
+            holidays: holidayRecords.length
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get comprehensive student attendance error:', error);
     res.status(500).json({ status: 'error', message: 'Server error' });
   }
 });
@@ -484,11 +601,11 @@ router.put('/edit', authenticate, facultyAndAbove, [
     const currentUser = req.user;
     const { classId, date, absentRollNumbers } = req.body;
 
-    // Normalize the date
-    const requestDate = new Date(date);
-    requestDate.setHours(0, 0, 0, 0);
+    // Get the attendance date in IST timezone
+    const requestDateString = getAttendanceDate(date);
+    const dateFilter = createISTExactDateFilter(requestDateString);
     
-    console.log('✏️ Editing attendance for date:', requestDate.toISOString().split('T')[0]);
+    console.log('✏️ Editing attendance for date:', requestDateString);
 
     // Authorization: Faculty can only edit attendance for their assigned class
     if (currentUser.role === 'faculty') {
@@ -524,32 +641,73 @@ router.put('/edit', authenticate, facultyAndAbove, [
     }
 
     // Update attendance records using bulkWrite
-    const bulkOps = students.map(s => ({
-      updateOne: {
-        filter: { studentId: s.userId, date: requestDate },
-        update: { 
-          $set: { 
-            status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present',
-            facultyId: currentUser._id
-          }
-        },
-        upsert: false // Only update existing records
+    const bulkOps = students.map(s => {
+      const isAbsent = absentees.includes(s.rollNumber);
+      const updateFields = {
+        status: isAbsent ? 'Absent' : 'Present',
+        facultyId: currentUser._id,
+        localDate: requestDateString, // Update IST date
+        updatedBy: 'faculty',
+        updatedAt: getCurrentISTTimestamp()
+      };
+      
+      // If changing from Absent to Present, clear the reason
+      if (!isAbsent) {
+        updateFields.reason = null;
       }
-    }));
+      
+      return {
+        updateOne: {
+          filter: { studentId: s.userId, localDate: requestDateString },
+          update: { $set: updateFields },
+          upsert: false // Only update existing records
+        }
+      };
+    });
 
-    const result = await Attendance.bulkWrite(bulkOps, { ordered: true });
-    console.log('✅ Edit bulk write result:', result);
+    console.log('📝 Bulk operations to execute:', JSON.stringify(bulkOps, null, 2));
+    
+    // Execute bulk write with error handling
+    let result;
+    try {
+      result = await Attendance.bulkWrite(bulkOps, { ordered: true });
+      console.log('✅ Edit bulk write result:', result);
+      
+      if (result.modifiedCount === 0) {
+        console.log('⚠️ No records were modified!');
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'No attendance records found to update for the specified date' 
+        });
+      }
+    } catch (bulkError) {
+      console.error('❌ Bulk write error:', bulkError);
+      return res.status(500).json({ 
+        status: 'error', 
+        message: 'Failed to update attendance records',
+        error: bulkError.message
+      });
+    }
 
-    // Verify records were updated
+    // Verify records were updated using localDate
     const verificationRecords = await Attendance.find({
       studentId: { $in: students.map(s => s.userId) },
-      date: requestDate
+      localDate: requestDateString
     });
     console.log(`🔍 Verification: Found ${verificationRecords.length} updated attendance records`);
+    console.log('🔍 Verification records:', JSON.stringify(verificationRecords, null, 2));
+    
+    if (verificationRecords.length === 0) {
+      console.log('❌ No verification records found!');
+      return res.status(500).json({ 
+        status: 'error', 
+        message: 'Attendance records were not updated properly' 
+      });
+    }
 
     // Update ClassAttendance record
     await ClassAttendance.findOneAndUpdate(
-      { classId, date: requestDate },
+      { classId, date: date }, // Use string date for ClassAttendance
       { 
         absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
         markedBy: currentUser._id
@@ -691,9 +849,20 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       return res.status(403).json({ status: 'error', message: 'You are not authorized to mark attendance for this class' });
     }
 
-    // Date normalize
-    const requestDate = req.body.date ? new Date(req.body.date) : new Date();
-    requestDate.setHours(0, 0, 0, 0);
+    // Get the selected date in IST and convert to YYYY-MM-DD string format
+    let requestDateString;
+    if (req.body.date) {
+      // If date is provided, ensure it's in IST and convert to string
+      const selectedDate = new Date(req.body.date);
+      // Convert to IST by adding 5.5 hours to avoid UTC conversion issues
+      const istDate = new Date(selectedDate.getTime() + (5.5 * 60 * 60 * 1000));
+      requestDateString = istDate.toISOString().split('T')[0];
+    } else {
+      // Use current IST date
+      const now = new Date();
+      const istDate = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+      requestDateString = istDate.toISOString().split('T')[0];
+    }
 
     // Fetch students from Student Management list
     const students = await Student.find({
@@ -732,12 +901,12 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       const student = rollToStudent.get(roll);
       bulkOps.push({
         updateOne: {
-          filter: { studentId: student.userId, classId: classKey, date: requestDate },
+          filter: { studentId: student.userId, classId: classKey, date: requestDateString },
           update: {
             $set: {
               status: 'Absent',
               facultyId: currentUser._id,
-              date: requestDate,
+              date: requestDateString,
               classId: classKey
             }
           },
@@ -751,12 +920,12 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       const student = rollToStudent.get(roll);
       bulkOps.push({
         updateOne: {
-          filter: { studentId: student.userId, classId: classKey, date: requestDate },
+          filter: { studentId: student.userId, classId: classKey, date: requestDateString },
           update: {
             $set: {
               status: 'Present',
               facultyId: currentUser._id,
-              date: requestDate,
+              date: requestDateString,
               classId: classKey
             }
           },
@@ -771,17 +940,17 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
     for (const student of students) {
       const status = absentees.includes(student.rollNumber) ? 'Absent' : 'Present';
       sendAttendanceEvent(String(student.userId), {
-        date: requestDate.toISOString().slice(0, 10),
+        date: requestDateString,
         status
       });
     }
 
     // Upsert ClassAttendance mark summary
     await ClassAttendance.findOneAndUpdate(
-      { classId: classKey, date: requestDate },
+      { classId: classKey, date: requestDateString },
       {
         classId: classKey,
-        date: requestDate,
+        date: requestDateString,
         absentRollNumbers: absentees.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
         presentRollNumbers: presentRollNumbers.map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)),
         markedBy: currentUser._id
@@ -1036,6 +1205,95 @@ router.put('/:id', authenticate, facultyAndAbove, [
     res.status(500).json({
       success: false,
       msg: 'Server error'
+    });
+  }
+});
+
+// @desc    Submit reason for absence (Student)
+// @route   PATCH /api/attendance/reason
+// @access  Student and above
+router.patch('/reason', authenticate, [
+  body('studentId').notEmpty().withMessage('Student ID is required'),
+  body('date').isISO8601().withMessage('Invalid date format'),
+  body('reason').notEmpty().withMessage('Reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { studentId, date, reason } = req.body;
+    const currentUser = req.user;
+
+    // Check if user can submit reason for this student
+    if (currentUser.role === 'student' && currentUser._id.toString() !== studentId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only submit reasons for your own attendance'
+      });
+    }
+
+    // Convert date to proper format for querying
+    const attendanceDate = new Date(`${date}T00:00:00Z`);
+
+    // Find the attendance record
+    const attendanceRecord = await Attendance.findOne({
+      studentId,
+      date: attendanceDate
+    });
+
+    if (!attendanceRecord) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Attendance record not found'
+      });
+    }
+
+    // Check if student is marked absent
+    if (attendanceRecord.status !== 'Absent') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Can only submit reasons for absent attendance'
+      });
+    }
+
+    // Update the reason
+    const updatedRecord = await Attendance.findOneAndUpdate(
+      { studentId, date: attendanceDate },
+      { 
+        $set: { 
+          reason: reason.trim(),
+          updatedBy: 'student',
+          updatedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Reason submitted successfully',
+      data: {
+        attendanceId: updatedRecord._id,
+        studentId: updatedRecord.studentId,
+        date: date,
+        status: updatedRecord.status,
+        reason: updatedRecord.reason,
+        updatedBy: updatedRecord.updatedBy,
+        updatedAt: updatedRecord.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Submit reason error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to submit reason'
     });
   }
 });

@@ -127,4 +127,17 @@ facultySchema.methods.toJSON = function() {
   return facultyObject;
 };
 
+// Compound unique index to ensure only one class advisor per batch/year/semester/section/department
+facultySchema.index({
+  batch: 1,
+  year: 1,
+  semester: 1,
+  section: 1,
+  department: 1
+}, { 
+  unique: true, 
+  partialFilterExpression: { is_class_advisor: true, status: 'active' },
+  name: 'unique_class_advisor_per_section'
+});
+
 export default mongoose.model('Faculty', facultySchema);

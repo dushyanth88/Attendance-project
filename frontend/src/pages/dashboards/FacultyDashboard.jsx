@@ -20,14 +20,14 @@ const FacultyDashboard = () => {
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [attendanceForm, setAttendanceForm] = useState({ 
-    date: new Date().toISOString().slice(0,10), 
+    date: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), 
     absentees: '' 
   });
   const [attendanceToast, setAttendanceToast] = useState({ show: false, message: '', type: 'success' });
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [isHoliday, setIsHoliday] = useState(false);
   const [holidayReason, setHolidayReason] = useState('');
-  const [historyDate, setHistoryDate] = useState(new Date().toISOString().slice(0,10));
+  const [historyDate, setHistoryDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
   const [historyRows, setHistoryRows] = useState([]);
   const [totalStudentsCount, setTotalStudentsCount] = useState(0);
   const [attendanceMarked, setAttendanceMarked] = useState(false);

@@ -50,7 +50,7 @@ const Toast = ({ message, type = 'success', onClose, duration = 3000 }) => {
   if (!isVisible) return null;
 
   return (
-    <div className={`fixed top-2 right-2 sm:top-4 sm:right-4 z-50 transform transition-all duration-300 ${
+    <div className={`fixed top-16 right-2 sm:top-20 sm:right-4 z-[9999] transform transition-all duration-300 ${
       isVisible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
     }`}>
       <div className={`${getToastStyles()} px-4 sm:px-6 py-3 sm:py-4 rounded-lg shadow-lg flex items-center space-x-2 sm:space-x-3 min-w-72 sm:min-w-80 max-w-sm sm:max-w-md`}>

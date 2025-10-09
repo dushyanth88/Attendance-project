@@ -114,12 +114,12 @@ router.get('/batch-ranges', (req, res) => {
 // @access  HOD and above
 router.post('/check-advisor-availability', async (req, res) => {
   try {
-    const { batch, year, semester, department } = req.body;
+    const { batch, year, semester, section, department } = req.body;
 
-    if (!batch || !year || !semester || !department) {
+    if (!batch || !year || !semester || !section || !department) {
       return res.status(400).json({
         success: false,
-        msg: 'Batch, year, semester, and department are required'
+        msg: 'Batch, year, semester, section, and department are required'
       });
     }
 
@@ -139,12 +139,13 @@ router.post('/check-advisor-availability', async (req, res) => {
       });
     }
 
-    // Check if another faculty is already assigned to this batch/year/semester in this department
+    // Check if another faculty is already assigned to this batch/year/semester/section in this department
     const existingAdvisor = await Faculty.findOne({
       is_class_advisor: true,
       batch,
       year,
       semester,
+      section, // ✅ Include section in uniqueness check
       department,
       status: 'active'
     });
@@ -275,12 +276,13 @@ router.post('/create', [
         });
       }
 
-      // Check if another faculty is already assigned to this batch/year/semester
+      // Check if another faculty is already assigned to this batch/year/semester/section
       const existingAdvisor = await Faculty.findOne({
         is_class_advisor: true,
         batch,
         year,
         semester,
+        section, // ✅ Include section in uniqueness check
         department: currentUser.department, // Use HOD's department
         status: 'active'
       });
@@ -288,7 +290,11 @@ router.post('/create', [
       if (existingAdvisor) {
         return res.status(400).json({
           status: 'error',
-          message: `Another faculty is already assigned as class advisor for Batch ${batch}, ${year}, Semester ${semester}`
+          message: `Another faculty is already assigned as class advisor for Batch ${batch}, ${year}, Semester ${semester}, Section ${section}`,
+          existingAdvisor: {
+            name: existingAdvisor.name,
+            email: existingAdvisor.email
+          }
         });
       }
     }

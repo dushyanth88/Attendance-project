@@ -152,7 +152,18 @@ async function getClassBasedAttendanceData(batch, year, semester, section, dateF
     .populate('studentId', 'name email mobile')
     .sort({ date: -1, 'studentId.name': 1 });
 
-  console.log(`📊 Found ${attendanceRecords.length} attendance records for classId: ${classId}`);
+    console.log(`📊 Found ${attendanceRecords.length} attendance records for classId: ${classId}`);
+    
+    // Debug: Log sample attendance records
+    if (attendanceRecords.length > 0) {
+      console.log('🔍 Sample attendance records:', attendanceRecords.slice(0, 3).map(record => ({
+        studentId: record.studentId._id,
+        studentName: record.studentId.name,
+        date: record.date.toISOString().split('T')[0],
+        status: record.status,
+        classId: record.classId
+      })));
+    }
   
   // Check for orphaned attendance records (students in attendance but not in student management)
   const orphanedRecords = attendanceRecords.filter(record => 
@@ -170,41 +181,78 @@ async function getClassBasedAttendanceData(batch, year, semester, section, dateF
   });
   console.log('🔍 Available classIds in DB:', allClassIds);
 
-  // Calculate cumulative absences for each student
-  const cumulativeAbsences = studentsInClass.map(student => {
-    const studentRecords = attendanceRecords.filter(record => 
-      record.studentId._id.toString() === student.userId._id.toString()
-    );
-    
-    const absentRecords = studentRecords.filter(record => record.status === 'Absent');
-    const totalAbsentDays = absentRecords.length;
-    
-    // Get the most recent absent record for reason and action taken
-    const latestAbsentRecord = absentRecords.length > 0 ? absentRecords[0] : null;
-    
-    // Validate student data completeness
-    const mobileNumber = student.mobile || student.userId.mobile;
-    const displayMobile = mobileNumber ? mobileNumber : 'N/A';
-    
-    console.log('📱 Student mobile data:', {
-      rollNumber: student.rollNumber,
-      studentMobile: student.mobile,
-      userMobile: student.userId.mobile,
-      finalMobile: displayMobile
-    });
-    
-    return {
-      studentId: student.userId._id,
-      rollNumber: student.rollNumber,
-      name: student.userId.name,
-      email: student.userId.email,
-      mobile: displayMobile,
-      totalAbsentDays,
-      reason: latestAbsentRecord?.reason || '',
-      actionTaken: latestAbsentRecord?.actionTaken || '',
-      absentDates: absentRecords.map(record => record.date.toISOString().split('T')[0])
-    };
-  }).filter(student => student.totalAbsentDays > 0); // Only include students with absences
+  // Calculate cumulative absences for each student using the same logic as student dashboard
+  const cumulativeAbsences = await Promise.all(
+    studentsInClass.map(async (student) => {
+      try {
+        // Get attendance records for this student using the same logic as student dashboard
+        const studentAttendanceRecords = await Attendance.find({
+          studentId: student.userId._id
+        }).sort({ date: -1 });
+
+        // Calculate statistics using the same logic as /api/attendance/student/:studentId/comprehensive
+        const presentCount = studentAttendanceRecords.filter(r => r.status === 'Present').length;
+        const absentCount = studentAttendanceRecords.filter(r => r.status === 'Absent').length;
+        const totalWorkingDays = presentCount + absentCount;
+        const attendancePercentage = totalWorkingDays > 0 ? Math.round((presentCount / totalWorkingDays) * 100) : 0;
+
+        // Get the most recent absent record for reason and action taken
+        const latestAbsentRecord = studentAttendanceRecords.find(record => record.status === 'Absent');
+        
+        // Get all absent dates
+        const absentDates = studentAttendanceRecords
+          .filter(record => record.status === 'Absent')
+          .map(record => record.date.toISOString().split('T')[0]);
+
+        // Debug: Log student attendance summary
+        console.log(`📊 Student ${student.rollNumber} (${student.userId.name}) - Attendance Summary:`, {
+          presentDays: presentCount,
+          absentDays: absentCount,
+          totalWorkingDays: totalWorkingDays,
+          attendancePercentage: attendancePercentage,
+          absentDates: absentDates
+        });
+
+        // Validate student data completeness
+        const mobileNumber = student.mobile || student.userId.mobile;
+        const displayMobile = mobileNumber ? mobileNumber : 'N/A';
+        
+        return {
+          studentId: student.userId._id,
+          rollNumber: student.rollNumber,
+          name: student.userId.name,
+          email: student.userId.email,
+          mobile: displayMobile,
+          totalAbsentDays: absentCount, // Use the calculated absent count from attendance summary
+          totalPresentDays: presentCount,
+          totalWorkingDays: totalWorkingDays,
+          attendancePercentage: attendancePercentage,
+          reason: latestAbsentRecord?.reason || '',
+          actionTaken: latestAbsentRecord?.actionTaken || '',
+          absentDates: absentDates
+        };
+      } catch (error) {
+        console.error(`❌ Error fetching attendance for student ${student.rollNumber}:`, error);
+        return {
+          studentId: student.userId._id,
+          rollNumber: student.rollNumber,
+          name: student.userId.name,
+          email: student.userId.email,
+          mobile: student.mobile || student.userId.mobile || 'N/A',
+          totalAbsentDays: 0,
+          totalPresentDays: 0,
+          totalWorkingDays: 0,
+          attendancePercentage: 0,
+          reason: '',
+          actionTaken: '',
+          absentDates: []
+        };
+      }
+    })
+  );
+
+  // Filter to only include students with absences
+  const studentsWithAbsences = cumulativeAbsences.filter(student => student.totalAbsentDays > 0);
 
   // Calculate total working days (excluding holidays)
   const allAttendanceDates = [...new Set(attendanceRecords.map(record => record.date.toISOString().split('T')[0]))];
@@ -214,7 +262,7 @@ async function getClassBasedAttendanceData(batch, year, semester, section, dateF
   return {
     studentsInClass,
     attendanceRecords,
-    cumulativeAbsences,
+    cumulativeAbsences: studentsWithAbsences, // Use the filtered list of students with absences
     holidays: holidays.map(h => ({
       date: h.holidayDate.toISOString().split('T')[0],
       reason: h.reason
@@ -805,17 +853,14 @@ router.get('/enhanced-absentees', [
       end.setHours(23, 59, 59, 999);
       dateFilter = { $gte: start, $lte: end };
     } else {
-      // Default to today if no date specified
-      const today = new Date();
-      const startOfDay = new Date(today);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+      // For enhanced reports, if no date specified, get ALL attendance records (cumulative)
+      // This ensures we capture all historical absences, not just today's
+      dateFilter = {}; // Empty filter means all dates
+      console.log('📅 No date specified - using cumulative mode (all dates)');
     }
 
     // Get class-based attendance data
-    const { studentsInClass, cumulativeAbsences, attendanceMarked, message } = 
+    const { studentsInClass, cumulativeAbsences, attendanceMarked, message, totalWorkingDays, holidays } = 
       await getClassBasedAttendanceData(batch, year, semester, section, dateFilter, currentUser);
 
     // Format the report data
@@ -826,7 +871,10 @@ router.get('/enhanced-absentees', [
       regNo: student.rollNumber,
       studentName: student.name,
       phoneNumber: student.mobile || 'N/A',
-      totalAbsentDays: student.totalAbsentDays,
+      totalAbsentDays: student.totalAbsentDays, // Now using the correct attendance summary data
+      totalPresentDays: student.totalPresentDays,
+      totalWorkingDays: student.totalWorkingDays,
+      attendancePercentage: student.attendancePercentage,
       reason: student.reason,
       actionTaken: student.actionTaken,
       absentDates: student.absentDates
@@ -836,8 +884,21 @@ router.get('/enhanced-absentees', [
       batch, year, semester, section,
       totalStudents: studentsInClass.length,
       totalAbsentees: cumulativeAbsences.length,
+      totalWorkingDays,
       attendanceMarked
     });
+
+    // Debug: Log sample student data to verify totalAbsentDays calculation
+    if (cumulativeAbsences.length > 0) {
+      console.log('🔍 Sample student absence data:', {
+        firstStudent: {
+          name: cumulativeAbsences[0].name,
+          rollNumber: cumulativeAbsences[0].rollNumber,
+          totalAbsentDays: cumulativeAbsences[0].totalAbsentDays,
+          absentDates: cumulativeAbsences[0].absentDates
+        }
+      });
+    }
 
     res.status(200).json({
       status: 'success',
@@ -852,8 +913,8 @@ router.get('/enhanced-absentees', [
         reportData,
         totalAbsentees: cumulativeAbsences.length,
         totalStudents: studentsInClass.length,
-        totalWorkingDays: reportData.totalWorkingDays || 0,
-        holidays: reportData.holidays || [],
+        totalWorkingDays: totalWorkingDays || 0,
+        holidays: holidays || [],
         attendanceMarked,
         message,
         generatedAt: new Date().toISOString(),
@@ -984,16 +1045,13 @@ router.get('/enhanced-absentees/export/pdf', async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter = { $gte: start, $lte: end };
     } else {
-      const today = new Date();
-      const startOfDay = new Date(today);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+      // For enhanced reports, if no date specified, get ALL attendance records (cumulative)
+      dateFilter = {}; // Empty filter means all dates
+      console.log('📅 PDF Export - No date specified - using cumulative mode (all dates)');
     }
 
     // Get class-based attendance data
-    const { studentsInClass, cumulativeAbsences, attendanceMarked, message } = 
+    const { studentsInClass, cumulativeAbsences, attendanceMarked, message, totalWorkingDays, holidays } = 
       await getClassBasedAttendanceData(batch, year, semester, section, dateFilter, currentUser);
 
     // Create PDF
@@ -1142,16 +1200,13 @@ router.get('/enhanced-absentees/export/excel', async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter = { $gte: start, $lte: end };
     } else {
-      const today = new Date();
-      const startOfDay = new Date(today);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+      // For enhanced reports, if no date specified, get ALL attendance records (cumulative)
+      dateFilter = {}; // Empty filter means all dates
+      console.log('📅 Excel Export - No date specified - using cumulative mode (all dates)');
     }
 
     // Get class-based attendance data
-    const { studentsInClass, cumulativeAbsences, attendanceMarked, message } = 
+    const { studentsInClass, cumulativeAbsences, attendanceMarked, message, totalWorkingDays, holidays } = 
       await getClassBasedAttendanceData(batch, year, semester, section, dateFilter, currentUser);
 
     // Create Excel workbook

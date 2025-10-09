@@ -20,6 +20,12 @@ const attendanceSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  localDate: {
+    type: String,
+    required: true,
+    trim: true,
+    match: [/^\d{4}-\d{2}-\d{2}$/, 'Local date must be in YYYY-MM-DD format']
+  },
   status: {
     type: String,
     enum: ['Present', 'Absent', 'Not Marked'],
@@ -37,6 +43,15 @@ const attendanceSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'Action taken cannot exceed 500 characters'],
     default: ''
+  },
+  updatedBy: {
+    type: String,
+    enum: ['faculty', 'student', 'admin'],
+    default: 'faculty'
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
