@@ -2,7 +2,10 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Faculty from '../models/Faculty.js';
 import User from '../models/User.js';
-import { authenticate, hodAndAbove } from '../middleware/auth.js';
+import ClassAssignment from '../models/ClassAssignment.js';
+import Student from '../models/Student.js';
+import { authenticate, hodAndAbove, facultyAndAbove } from '../middleware/auth.js';
+import { createStudentWithStandardizedData } from '../services/studentCreationService.js';
 
 const router = express.Router();
 
@@ -58,12 +61,12 @@ router.get('/profile/:userId', authenticate, async (req, res) => {
 
 // All other faculty routes require authentication and HOD or above role
 router.use(authenticate);
-router.use(hodAndAbove);
+// Note: Individual routes will specify their own authorization requirements
 
 // @desc    Test HOD authentication
 // @route   GET /api/faculty/test-auth
 // @access  HOD and above
-router.get('/test-auth', (req, res) => {
+router.get('/test-auth', hodAndAbove, (req, res) => {
   res.json({
     status: 'success',
     message: 'HOD authentication working',
@@ -92,8 +95,8 @@ const generateBatchRanges = () => {
 
 // @desc    Get available batch ranges for HOD
 // @route   GET /api/faculty/batch-ranges
-// @access  HOD and above
-router.get('/batch-ranges', (req, res) => {
+// @access  Faculty and above
+router.get('/batch-ranges', facultyAndAbove, (req, res) => {
   try {
     const batches = generateBatchRanges();
     res.json({
@@ -112,7 +115,7 @@ router.get('/batch-ranges', (req, res) => {
 // @desc    Check if class advisor position is available for HOD
 // @route   POST /api/faculty/check-advisor-availability
 // @access  HOD and above
-router.post('/check-advisor-availability', async (req, res) => {
+router.post('/check-advisor-availability', hodAndAbove, async (req, res) => {
   try {
     const { batch, year, semester, section, department } = req.body;
 
@@ -181,7 +184,7 @@ router.post('/check-advisor-availability', async (req, res) => {
 // @desc    Create new faculty
 // @route   POST /api/faculty/create
 // @access  HOD and above
-router.post('/create', [
+router.post('/create', hodAndAbove, [
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
@@ -339,9 +342,52 @@ router.post('/create', [
       batch: is_class_advisor ? batch : undefined,
       year: is_class_advisor ? year : undefined,
       semester: is_class_advisor ? semester : undefined,
-      section: is_class_advisor ? section : undefined
+      section: is_class_advisor ? section : undefined,
+      // Initialize assignedClasses array
+      assignedClasses: []
     });
     await faculty.save();
+
+    // If faculty is assigned as class advisor, add to assignedClasses array
+    if (is_class_advisor && batch && year && semester && section) {
+      console.log('Adding class assignment to faculty during creation:', {
+        batch,
+        year,
+        semester,
+        section,
+        assignedBy: currentUser._id
+      });
+      
+      faculty.assignedClasses.push({
+        batch,
+        year,
+        semester,
+        section,
+        assignedDate: new Date(),
+        assignedBy: currentUser._id,
+        active: true
+      });
+      await faculty.save();
+      console.log('Faculty assignedClasses updated:', faculty.assignedClasses);
+
+      // Also create a ClassAssignment record
+      try {
+        const classAssignment = await ClassAssignment.assignAdvisor({
+          facultyId: user._id,
+          batch,
+          year,
+          semester,
+          section,
+          departmentId: currentUser._id,
+          assignedBy: currentUser._id,
+          notes: `Assigned during faculty creation by HOD ${currentUser.name}`
+        });
+        console.log('ClassAssignment record created during faculty creation:', classAssignment._id);
+      } catch (classAssignmentError) {
+        console.error('Error creating ClassAssignment record during faculty creation:', classAssignmentError);
+        // Don't fail the faculty creation, just log the error
+      }
+    }
 
     const facultyResponse = faculty.toObject();
 
@@ -377,7 +423,7 @@ router.post('/create', [
 // @desc    Get all faculties in HOD's department
 // @route   GET /api/faculty/list
 // @access  HOD and above
-router.get('/list', async (req, res) => {
+router.get('/list', hodAndAbove, async (req, res) => {
   try {
     const currentUser = req.user;
     const page = parseInt(req.query.page) || 1;
@@ -407,7 +453,8 @@ router.get('/list', async (req, res) => {
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean(); // Use lean() to avoid schema validation issues
 
     const total = await Faculty.countDocuments(filter);
 
@@ -427,15 +474,277 @@ router.get('/list', async (req, res) => {
     console.error('Get faculties error:', error);
     res.status(500).json({
       status: 'error',
+      message: 'Server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get faculty assigned classes
+// @route   GET /api/faculty/:facultyId/classes
+// @access  Faculty and above
+router.get('/:facultyId/classes', facultyAndAbove, async (req, res) => {
+  try {
+    const { facultyId } = req.params;
+    const currentUser = req.user;
+
+    // Verify the faculty is accessing their own classes or is HOD/admin
+    if (currentUser._id.toString() !== facultyId && !['hod', 'admin', 'principal'].includes(currentUser.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only access your own assigned classes'
+      });
+    }
+
+    console.log('🔍 Fetching assigned classes for faculty:', facultyId);
+
+    // Get assigned classes from ClassAssignment model
+    const classAssignments = await ClassAssignment.find({
+      facultyId: facultyId,
+      active: true
+    }).populate('facultyId', 'name email');
+
+    console.log('📋 Found class assignments:', classAssignments.length, classAssignments);
+
+    // Format assigned classes
+    const assignedClasses = classAssignments.map(assignment => ({
+      classId: assignment._id,
+      batch: assignment.batch,
+      year: assignment.year,
+      semester: assignment.semester,
+      section: assignment.section,
+      department: assignment.departmentId,
+      assignedDate: assignment.assignedDate,
+      notes: assignment.notes
+    }));
+
+    console.log('✅ Formatted assigned classes:', assignedClasses);
+
+    res.json({
+      success: true,
+      data: assignedClasses,
+      message: 'Assigned classes retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching faculty assigned classes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching assigned classes'
+    });
+  }
+});
+
+// @desc    Get faculty dashboard data
+// @route   GET /api/faculty/:facultyId/dashboard
+// @access  Faculty and above
+router.get('/:facultyId/dashboard', facultyAndAbove, async (req, res) => {
+  try {
+    const { facultyId } = req.params;
+    const currentUser = req.user;
+
+    // Verify the faculty is accessing their own dashboard or is HOD/admin
+    if (currentUser._id.toString() !== facultyId && !['hod', 'admin', 'principal'].includes(currentUser.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only access your own dashboard'
+      });
+    }
+
+    // Get faculty profile
+    const faculty = await Faculty.findOne({
+      userId: facultyId,
+      status: 'active'
+    }).populate('userId', 'name email department');
+
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: 'Faculty not found'
+      });
+    }
+
+    // Get assigned classes from ClassAssignment model
+    const classAssignments = await ClassAssignment.find({
+      facultyId: facultyId,
+      active: true
+    }).populate('facultyId', 'name email');
+
+    // Format assigned classes
+    const assignedClasses = classAssignments.map(assignment => ({
+      id: assignment._id,
+      batch: assignment.batch,
+      year: assignment.year,
+      sem: assignment.semester,
+      section: assignment.section,
+      department: assignment.departmentId,
+      assignedDate: assignment.assignedDate
+    }));
+
+    res.json({
+      success: true,
+      faculty: {
+        name: faculty.userId.name,
+        email: faculty.userId.email,
+        department: faculty.userId.department,
+        position: faculty.position,
+        isClassAdvisor: faculty.is_class_advisor
+      },
+      assignedClasses: assignedClasses
+    });
+
+  } catch (error) {
+    console.error('Error fetching faculty dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching faculty dashboard'
+    });
+  }
+});
+
+// @desc    Get students by batch, year, and semester for class advisor
+// @route   GET /api/faculty/students?batch=2022-2026&year=2nd Year&semester=3&department=CSE
+// @access  Faculty and above (Class Advisor)
+router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const { batch, year, semester, department } = req.query;
+    const currentUser = req.user;
+
+    console.log('🔍 Students request:', { batch, year, semester, department, userId: currentUser._id });
+
+    if (!batch || !year || !semester || !department) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch, year, semester, and department are required'
+      });
+    }
+
+    // Check if faculty is class advisor for this batch/year/semester
+    // First check ClassAssignment model
+    const classAssignment = await ClassAssignment.findOne({
+      facultyId: currentUser._id,
+      batch,
+      year,
+      semester: parseInt(semester),
+      section: 'A', // Default section for now
+      active: true
+    });
+
+    // If not found in ClassAssignment, check Faculty model
+    let faculty = null;
+    if (!classAssignment) {
+      faculty = await Faculty.findOne({ 
+      userId: currentUser._id,
+      is_class_advisor: true,
+      batch,
+      year,
+      semester: parseInt(semester),
+      department,
+      status: 'active'
+    });
+    }
+
+    if (!classAssignment && !faculty) {
+      console.log('❌ Faculty not authorized for this class:', { batch, year, semester, department });
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to manage students for this class'
+      });
+    }
+
+    console.log('✅ Faculty authorized, fetching students for:', { batch, year, semester, department });
+
+    // Find students for this batch/year/semester in the specified department
+    // Only show students created by this faculty
+    const facultyId = classAssignment ? classAssignment.facultyId : faculty._id;
+    
+    // Build classId for querying - same format as stored in bulk upload
+    // Format: batch_year_semester_section (e.g., "2024-2028_1st Year_Sem 1_A")
+    const normalizedYear = year; // Already in correct format from request
+    const normalizedSemester = `Sem ${semester}`; // Convert to "Sem X" format
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_A`;
+    
+    console.log('🔍 Querying students with classId:', classId);
+    
+    // First try with classId for precise matching
+    let students = await Student.find({
+      classId: classId,
+      facultyId: facultyId, // Only show students created by this faculty
+      status: 'active' // Exclude soft-deleted students
+    }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
+    
+    // If no students found with classId, try without classId (backward compatibility)
+    if (students.length === 0) {
+      console.log('⚠️ No students found with classId, trying without classId filter...');
+      students = await Student.find({
+        batch,
+        year,
+        semester: `Sem ${semester}`,
+        department,
+        facultyId: facultyId, // Only show students created by this faculty
+        status: 'active' // Exclude soft-deleted students
+      }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
+    }
+
+    // If no students found in Student model, try User model
+    if (students.length === 0) {
+      console.log('📊 No students found in Student model, checking User model...');
+      const userStudents = await User.find({
+        role: 'student',
+        department,
+        createdBy: currentUser._id, // Only show students created by this faculty
+        status: 'active'
+      }).select('name email phone').sort({ name: 1 });
+
+      // Convert User records to Student-like format
+      students = userStudents.map((user, index) => ({
+        _id: user._id,
+        rollNumber: `STU${String(index + 1).padStart(3, '0')}`, // Generate roll number
+        name: user.name,
+        email: user.email,
+        mobile: user.phone || 'N/A',
+        userId: user._id
+      }));
+    }
+
+    console.log('📊 Found students:', students.length);
+    console.log('📊 Student data structure:', students.map(s => ({
+      _id: s._id,
+      rollNumber: s.rollNumber,
+      name: s.name,
+      email: s.email,
+      mobile: s.mobile,
+      userId: s.userId,
+      classId: s.classId,
+      facultyId: s.facultyId
+    })));
+    
+    // Additional debugging for classId
+    if (students.length > 0) {
+      console.log('🔍 Sample student classId:', students[0].classId);
+      console.log('🔍 Expected classId format:', classId);
+      console.log('🔍 ClassId match:', students[0].classId === classId);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        students,
+        total: students.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({
+      success: false,
       message: 'Server error'
     });
   }
 });
 
-// @desc    Get faculty by ID
 // @route   GET /api/faculty/:id
 // @access  HOD and above
-router.get('/:id', async (req, res) => {
+router.get('/:id', hodAndAbove, async (req, res) => {
   try {
     const faculty = await Faculty.findById(req.params.id)
       .select('-password')
@@ -464,7 +773,7 @@ router.get('/:id', async (req, res) => {
 // @desc    Update faculty
 // @route   PUT /api/faculty/:id
 // @access  HOD and above
-router.put('/:id', [
+router.put('/:id', hodAndAbove, [
   body('name').optional().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').optional().isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('position').optional().isIn(['Assistant Professor', 'Associate Professor', 'Professor']).withMessage('Invalid position'),
@@ -536,8 +845,9 @@ router.put('/:id', [
 // @desc    Delete faculty
 // @route   DELETE /api/faculty/:id
 // @access  HOD and above
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', hodAndAbove, async (req, res) => {
   try {
+    console.log('🗑️ Delete faculty route hit:', req.params.id, 'URL:', req.url);
     const faculty = await Faculty.findById(req.params.id);
     if (!faculty) {
       return res.status(404).json({
@@ -546,11 +856,57 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    await Faculty.findByIdAndDelete(req.params.id);
+    console.log('Deleting faculty:', faculty.name, 'with userId:', faculty.userId);
+
+    const deletionResults = {
+      classAssignments: 0,
+      user: false,
+      faculty: false
+    };
+
+    // Delete all ClassAssignment records for this faculty
+    try {
+      const classAssignments = await ClassAssignment.find({
+        facultyId: faculty.userId
+      });
+      
+      console.log('Found ClassAssignment records to delete:', classAssignments.length);
+      for (const assignment of classAssignments) {
+        await assignment.completeRemoval();
+        deletionResults.classAssignments++;
+        console.log('✅ Completely removed assignment:', assignment._id);
+      }
+    } catch (error) {
+      console.error('Error deleting ClassAssignment records:', error);
+    }
+
+    // Delete the associated User record
+    try {
+      const user = await User.findById(faculty.userId);
+      if (user) {
+        await User.findByIdAndDelete(faculty.userId);
+        deletionResults.user = true;
+        console.log('Deleted User record:', faculty.userId);
+      }
+    } catch (error) {
+      console.error('Error deleting User record:', error);
+    }
+
+    // Delete the Faculty record
+    try {
+      await Faculty.findByIdAndDelete(req.params.id);
+      deletionResults.faculty = true;
+      console.log('Deleted Faculty record:', req.params.id);
+    } catch (error) {
+      console.error('Error deleting Faculty record:', error);
+    }
+
+    console.log('Deletion results:', deletionResults);
 
     res.status(200).json({
       status: 'success',
-      message: 'Faculty deleted successfully'
+      message: `Faculty deleted successfully. Removed ${deletionResults.classAssignments} class assignments, user account, and faculty record.`,
+      deletionResults
     });
   } catch (error) {
     console.error('Delete faculty error:', error);
@@ -562,94 +918,28 @@ router.delete('/:id', async (req, res) => {
 });
 
 // @desc    Get students by batch, year, and semester for class advisor
-// @route   GET /api/faculty/students?batch=2022-2026&year=2nd Year&semester=3&department=CSE
-// @access  Faculty and above (Class Advisor)
-router.get('/students', authenticate, async (req, res) => {
-  try {
-    const { batch, year, semester, department } = req.query;
-    const currentUser = req.user;
-
-    console.log('🔍 Students request:', { batch, year, semester, department, userId: currentUser._id });
-
-    if (!batch || !year || !semester || !department) {
-      return res.status(400).json({
-        success: false,
-        message: 'Batch, year, semester, and department are required'
-      });
-    }
-
-    // Check if faculty is class advisor for this batch/year/semester
-    const faculty = await Faculty.findOne({ 
-      userId: currentUser._id,
-      is_class_advisor: true,
-      batch,
-      year,
-      semester: parseInt(semester),
-      department,
-      status: 'active'
-    });
-
-    if (!faculty) {
-      console.log('❌ Faculty not authorized for this class:', { batch, year, semester, department });
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to manage students for this class'
-      });
-    }
-
-    console.log('✅ Faculty authorized, fetching students for:', { batch, year, semester, department });
-
-    // Find students for this batch/year/semester in the specified department
-    const students = await Student.find({
-      batch,
-      year,
-      semester: `Sem ${semester}`,
-      department,
-      status: 'active'
-    }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
-
-    console.log('📊 Found students:', students.length);
-    console.log('📊 Student data structure:', students.map(s => ({
-      _id: s._id,
-      rollNumber: s.rollNumber,
-      name: s.name,
-      email: s.email,
-      mobile: s.mobile,
-      userId: s.userId
-    })));
-
-    res.json({
-      success: true,
-      data: {
-        students,
-        total: students.length
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching students:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
-  }
-});
 
 // @desc    Create student for class advisor
 // @route   POST /api/faculty/students
-// @access  HOD and above (Class Advisor)
-router.post('/students', [
+// @access  Faculty and above (Class Advisor)
+router.post('/students', facultyAndAbove, [
   body('rollNumber').trim().isLength({ min: 1 }).withMessage('Roll number is required'),
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('mobile').matches(/^[0-9]{10}$/).withMessage('Mobile number must be exactly 10 digits'),
+  body('parentContact').matches(/^[0-9]{10}$/).withMessage('Parent contact must be exactly 10 digits'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
   body('year').isIn(['1st Year', '2nd Year', '3rd Year', '4th Year']).withMessage('Invalid year'),
+  body('semester').optional().isIn(['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sem 5', 'Sem 6', 'Sem 7', 'Sem 8']).withMessage('Invalid semester'),
+  body('section').optional().isIn(['A', 'B', 'C']).withMessage('Section must be A, B, or C'),
   body('department').isIn(['CSE', 'IT', 'ECE', 'EEE', 'Civil', 'Mechanical', 'CSBS', 'AIDS']).withMessage('Invalid department')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Student creation validation errors:', errors.array());
+      console.log('❌ Request body:', req.body);
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
@@ -657,97 +947,41 @@ router.post('/students', [
       });
     }
 
-    const { rollNumber, name, email, mobile, password, batch, year, department } = req.body;
+    const { rollNumber, name, email, mobile, parentContact, password, batch, year, semester, section, department } = req.body;
     const currentUser = req.user;
 
-    // Check if faculty is class advisor for this batch/year
-    const faculty = await Faculty.findOne({ 
-      userId: currentUser._id,
-      is_class_advisor: true,
-      batch,
-      year,
-      status: 'active'
+    // Use standardized student creation service
+    const result = await createStudentWithStandardizedData({
+      currentUser,
+      studentData: {
+        rollNumber,
+        name,
+        email,
+        mobile,
+        parentContact,
+        password
+      },
+      classContext: {
+        batch,
+        year,
+        semester: semester || 'Sem 1',
+        section: section || 'A',
+        department
+      }
     });
 
-    if (!faculty) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to create students for this batch and year'
-      });
-    }
-
-    // Check if department matches faculty's department
-    if (department !== currentUser.department) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only create students in your own department'
-      });
-    }
-
-    // Check for existing user with same email
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    if (!result.success) {
       return res.status(400).json({
         success: false,
-        message: 'Student already exists with this email'
+        message: result.error.message,
+        details: result.error.details
       });
     }
-
-    // Check for existing student with same roll number in the same batch/year
-    const existingStudent = await Student.findOne({ 
-      rollNumber, 
-      batch, 
-      year,
-      department 
-    });
-    if (existingStudent) {
-      return res.status(400).json({
-        success: false,
-        message: 'Student already exists with this roll number in the same batch and year'
-      });
-    }
-
-    // Check for existing mobile number
-    const existingMobile = await Student.findOne({ mobile });
-    if (existingMobile) {
-      return res.status(400).json({
-        success: false,
-        message: 'Student already exists with this mobile number'
-      });
-    }
-
-    // Create user account
-    const user = new User({
-      name,
-      email: email.toLowerCase(),
-      password,
-      role: 'student',
-      department,
-      createdBy: currentUser._id
-    });
-    await user.save();
-
-    // Create student profile
-    const student = new Student({
-      userId: user._id,
-      rollNumber,
-      name,
-      email: email.toLowerCase(),
-      mobile,
-      batch,
-      year,
-      semester: 'Sem 1', // Default semester
-      classAssigned: '1A', // Default class assignment
-      facultyId: faculty._id,
-      department,
-      createdBy: currentUser._id
-    });
-    await student.save();
 
     res.status(201).json({
       success: true,
       message: `Student created successfully for ${batch}, ${year}`,
-      data: student
+      data: result.student
     });
   } catch (error) {
     console.error('Error creating student:', error);
@@ -760,11 +994,12 @@ router.post('/students', [
 
 // @desc    Update student for class advisor
 // @route   PUT /api/faculty/students/:id
-// @access  HOD and above (Class Advisor)
-router.put('/students/:id', [
+// @access  Faculty and above (Class Advisor)
+router.put('/students/:id', authenticate, facultyAndAbove, [
   body('name').optional().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').optional().isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('mobile').optional().matches(/^[0-9]{10}$/).withMessage('Mobile number must be exactly 10 digits'),
+  body('parentContact').optional().matches(/^[0-9]{10}$/).withMessage('Parent contact must be exactly 10 digits'),
   body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
 ], async (req, res) => {
   try {
@@ -778,7 +1013,7 @@ router.put('/students/:id', [
     }
 
     const { id } = req.params;
-    const { name, email, mobile, password } = req.body;
+    const { name, email, mobile, parentContact, password } = req.body;
     const currentUser = req.user;
 
     // Find the student
@@ -838,6 +1073,7 @@ router.put('/students/:id', [
     if (name) student.name = name;
     if (email) student.email = email.toLowerCase();
     if (mobile) student.mobile = mobile;
+    if (parentContact) student.parentContact = parentContact;
     await student.save();
 
     // Update user account
@@ -849,25 +1085,60 @@ router.put('/students/:id', [
       await user.save();
     }
 
+    // Return complete updated student data in the expected format
+    const updatedStudent = {
+      id: student._id,
+      _id: student._id,
+      userId: student.userId,
+      rollNumber: student.rollNumber,
+      name: student.name,
+      email: student.email,
+      mobile: student.mobile || '',
+      parentContact: student.parentContact || '',
+      department: student.department,
+      batch: student.batch,
+      year: student.year,
+      semester: student.semester,
+      section: faculty?.section || 'A'
+    };
+
     res.json({
       success: true,
       message: 'Student updated successfully',
-      data: student
+      data: updatedStudent
     });
   } catch (error) {
     console.error('Error updating student:', error);
+    
+    // Handle specific error types
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: Object.values(error.errors).map(err => err.message)
+      });
+    }
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duplicate field value. Please check email or mobile number.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error. Please try again later.'
     });
   }
 });
 
 // @desc    Delete student for class advisor
 // @route   DELETE /api/faculty/students/:id
-// @access  HOD and above (Class Advisor)
-router.delete('/students/:id', async (req, res) => {
+// @access  Faculty and above (Class Advisor)
+router.delete('/students/:id', authenticate, facultyAndAbove, async (req, res) => {
   try {
+    console.log('🗑️ Delete student route hit:', req.params.id);
     const { id } = req.params;
     const currentUser = req.user;
 
@@ -915,10 +1186,120 @@ router.delete('/students/:id', async (req, res) => {
   }
 });
 
+// @desc    Delete student for class advisor (alternative route)
+// @route   DELETE /api/faculty/delete-student/:id
+// @access  Faculty and above (Class Advisor)
+router.delete('/delete-student/:id', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    console.log('🗑️ Delete student (alt route) hit:', req.params.id);
+    const { id } = req.params;
+    const currentUser = req.user;
+
+    // Find the student
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Check if faculty is class advisor for this student's batch/year
+    const faculty = await Faculty.findOne({ 
+      userId: currentUser._id,
+      is_class_advisor: true,
+      batch: student.batch,
+      year: student.year,
+      status: 'active'
+    });
+
+    if (!faculty) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this student'
+      });
+    }
+
+    // Soft delete: Mark student as inactive instead of hard delete
+    await Student.findByIdAndUpdate(id, { 
+      status: 'inactive',
+      deletedAt: new Date(),
+      deletedBy: currentUser._id
+    });
+
+    // Also mark user as inactive
+    await User.findByIdAndUpdate(student.userId, { 
+      status: 'inactive',
+      deletedAt: new Date(),
+      deletedBy: currentUser._id
+    });
+
+    // Cascade updates: Mark attendance records as inactive
+    try {
+      const Attendance = (await import('../models/Attendance.js')).default;
+      await Attendance.updateMany(
+        { studentId: id },
+        { 
+          status: 'inactive',
+          deletedAt: new Date(),
+          deletedBy: currentUser._id
+        }
+      );
+      console.log('✅ Attendance records marked as inactive for student:', id);
+    } catch (attendanceError) {
+      console.error('⚠️ Error updating attendance records:', attendanceError.message);
+    }
+
+    // Cascade updates: Mark class attendance records as inactive
+    try {
+      const ClassAttendance = (await import('../models/ClassAttendance.js')).default;
+      await ClassAttendance.updateMany(
+        { 'students.studentId': id },
+        { 
+          $set: { 
+            'students.$.status': 'inactive',
+            'students.$.deletedAt': new Date(),
+            'students.$.deletedBy': currentUser._id
+          }
+        }
+      );
+      console.log('✅ Class attendance records updated for student:', id);
+    } catch (classAttendanceError) {
+      console.error('⚠️ Error updating class attendance records:', classAttendanceError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Student deleted successfully',
+      data: {
+        id: student._id,
+        rollNumber: student.rollNumber,
+        name: student.name,
+        deletedAt: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('Error deleting student:', error);
+    
+    // Handle specific error types
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid student ID format'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error. Please try again later.'
+    });
+  }
+});
+
 // @desc    Get assigned classes for class advisor
 // @route   GET /api/faculty/assigned-classes
 // @access  Faculty and above (Class Advisor)
-router.get('/assigned-classes', authenticate, async (req, res) => {
+router.get('/assigned-classes', facultyAndAbove, async (req, res) => {
   try {
     console.log('🔍 Assigned classes request from user:', req.user?.id);
     
@@ -976,6 +1357,309 @@ router.get('/assigned-classes', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while fetching assigned classes'
+    });
+  }
+});
+
+// @desc    Add class assignment to faculty
+// @route   POST /api/faculty/:id/assign-class
+// @access  HOD and above
+router.post('/:id/assign-class', hodAndAbove, [
+  body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
+  body('year').isIn(['1st Year', '2nd Year', '3rd Year', '4th Year']).withMessage('Invalid year'),
+  body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1-8'),
+  body('section').isIn(['A', 'B', 'C']).withMessage('Section must be one of: A, B, C')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { id } = req.params;
+    const { batch, year, semester, section } = req.body;
+    const currentUser = req.user;
+    
+    console.log('Class assignment validation:', { batch, year, semester, section });
+
+    // Validate semester based on year
+    const validSemesters = {
+      "1st Year": [1, 2],
+      "2nd Year": [3, 4],
+      "3rd Year": [5, 6],
+      "4th Year": [7, 8]
+    };
+
+    if (!validSemesters[year] || !validSemesters[year].includes(parseInt(semester))) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Invalid semester for ${year}. Valid semesters are: ${validSemesters[year].join(', ')}`
+      });
+    }
+
+    // Check if class is open for assignment (check if students exist for this batch/year/semester)
+    const Student = require('../models/Student.js');
+    const studentCount = await Student.countDocuments({
+      batch,
+      year,
+      semester: `Sem ${semester}`,
+      department: currentUser.department,
+      status: 'active'
+    });
+
+    if (studentCount === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: `No students found for ${year} | Semester ${semester} | Section ${section}. Class is not open for assignment.`
+      });
+    }
+
+    console.log(`Class validation passed: ${studentCount} students found for ${year} | Semester ${semester}`);
+
+    const faculty = await Faculty.findById(id);
+    if (!faculty) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Faculty not found'
+      });
+    }
+
+    // Check if faculty is in the same department
+    if (faculty.department !== currentUser.department) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only assign faculty from your own department'
+      });
+    }
+
+    // Check if another faculty is already assigned to this class
+    const existingFaculty = await Faculty.findOne({
+      _id: { $ne: id },
+      department: currentUser.department,
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': year,
+      'assignedClasses.semester': semester,
+      'assignedClasses.section': section,
+      'assignedClasses.active': true,
+      status: 'active'
+    });
+
+    if (existingFaculty) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Another faculty is already assigned as class advisor for ${year} | Semester ${semester} | Section ${section}`,
+        existingFaculty: {
+          name: existingFaculty.name,
+          email: existingFaculty.email
+        }
+      });
+    }
+
+    // Add the class assignment to Faculty model
+    await faculty.addClassAssignment({
+      batch,
+      year,
+      semester,
+      section,
+      assignedBy: currentUser._id
+    });
+
+    // Also create a ClassAssignment record
+    const classAssignment = await ClassAssignment.assignAdvisor({
+      facultyId: faculty.userId, // Use the User ID, not Faculty ID
+      batch,
+      year,
+      semester,
+      section,
+      departmentId: currentUser._id,
+      assignedBy: currentUser._id,
+      notes: `Assigned by HOD ${currentUser.name}`
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Class advisor assigned successfully for ${year} | Semester ${semester} | Section ${section}`,
+      data: {
+        faculty: faculty,
+        classAssignment: classAssignment,
+        assignment: {
+          batch,
+          year,
+          semester,
+          section,
+          assignedDate: new Date()
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error assigning class:', error);
+    if (error.message === 'Faculty is already assigned to this class') {
+      return res.status(400).json({
+        status: 'error',
+        message: error.message
+      });
+    }
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while assigning class'
+    });
+  }
+});
+
+// @desc    Remove class assignment from faculty
+// @route   DELETE /api/faculty/:id/class/:classId
+// @access  HOD and above
+router.delete('/:id/class/:classId', hodAndAbove, async (req, res) => {
+  try {
+    const { id, classId } = req.params;
+    const currentUser = req.user;
+
+    const faculty = await Faculty.findById(id);
+    if (!faculty) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Faculty not found'
+      });
+    }
+
+    // Check if faculty is in the same department
+    if (faculty.department !== currentUser.department) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only manage faculty from your own department'
+      });
+    }
+
+    // Find the specific class assignment
+    const assignment = (faculty.assignedClasses || []).find(cls => cls._id.toString() === classId);
+    if (!assignment || !assignment.active) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Class assignment not found'
+      });
+    }
+    
+    console.log('Found assignment to remove:', assignment);
+
+    // Remove the assignment from Faculty model
+    await faculty.removeClassAssignment(
+      assignment.batch,
+      assignment.year,
+      assignment.semester,
+      assignment.section
+    );
+
+    // Also delete the ClassAssignment record completely
+    const classAssignment = await ClassAssignment.findOne({
+      facultyId: faculty.userId,
+      batch: assignment.batch,
+      year: assignment.year,
+      semester: assignment.semester,
+      section: assignment.section,
+      active: true
+    });
+
+    if (classAssignment) {
+      console.log('🔄 Completely removing ClassAssignment record:', classAssignment._id);
+      await classAssignment.completeRemoval();
+      console.log('✅ ClassAssignment record completely removed from all models');
+    } else {
+      console.log('⚠️ No active ClassAssignment record found to delete');
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: `Class advisor assignment completely removed from all models for ${assignment.year} | Semester ${assignment.semester} | Section ${assignment.section}`,
+      data: {
+        removedAssignment: {
+          batch: assignment.batch,
+          year: assignment.year,
+          semester: assignment.semester,
+          section: assignment.section
+        },
+        deletionResults: {
+          facultyModel: 'Assignment removed from assignedClasses array',
+          classAssignmentModel: classAssignment ? 'Record deleted' : 'No record found'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error removing class assignment:', error);
+    if (error.message === 'Assignment not found') {
+      return res.status(404).json({
+        status: 'error',
+        message: error.message
+      });
+    }
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while removing class assignment'
+    });
+  }
+});
+
+// @desc    Get faculty with detailed class assignments
+// @route   GET /api/faculty/:id/assignments
+// @access  HOD and above
+router.get('/:id/assignments', hodAndAbove, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUser = req.user;
+    
+    const faculty = await Faculty.findById(id)
+      .populate('assignedClasses.assignedBy', 'name email')
+      .populate('createdBy', 'name email');
+
+    if (!faculty) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Faculty not found'
+      });
+    }
+
+    // Check if faculty is in the same department
+    if (faculty.department !== currentUser.department) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only view faculty from your own department'
+      });
+    }
+
+    const activeAssignments = faculty.getActiveAssignments();
+
+    // Also get ClassAssignment records for this faculty
+    const classAssignments = await ClassAssignment.find({
+      facultyId: faculty.userId,
+      active: true
+    }).populate('facultyId', 'name email position');
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        faculty: {
+          id: faculty._id,
+          name: faculty.name,
+          email: faculty.email,
+          position: faculty.position,
+          department: faculty.department,
+          status: faculty.status,
+          phone: faculty.phone
+        },
+        assignments: activeAssignments,
+        classAssignments: classAssignments,
+        totalAssignments: activeAssignments.length,
+        advisorStatus: faculty.getAdvisorAssignment()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching faculty assignments:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while fetching faculty assignments'
     });
   }
 });

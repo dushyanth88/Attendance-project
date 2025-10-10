@@ -26,6 +26,11 @@ const studentSchema = new mongoose.Schema({
     trim: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
+  classId: {
+    type: String,
+    required: false, // Made optional for migration compatibility
+    trim: true
+  },
   classAssigned: {
     type: String,
     required: [true, 'Class assignment is required'],
@@ -95,6 +100,17 @@ const studentSchema = new mongoose.Schema({
       message: 'Mobile number must be exactly 10 digits'
     }
   },
+  parentContact: {
+    type: String,
+    required: [true, 'Parent contact is required'],
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^[0-9]{10}$/.test(v);
+      },
+      message: 'Parent contact must be exactly 10 digits'
+    }
+  },
   address: {
     type: String,
     trim: true
@@ -111,8 +127,39 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Compound unique index to enforce roll number unique within batch
-studentSchema.index({ batch: 1, rollNumber: 1 }, { unique: true });
+// Pre-save middleware to auto-generate classId
+studentSchema.pre('save', function(next) {
+  if (!this.classId && this.batch && this.year && this.semester) {
+    this.classId = `${this.batch}_${this.year}_${this.semester}_${this.section || 'A'}`;
+  }
+  next();
+});
+
+// Compound unique index to enforce roll number unique within class (only for non-null classId)
+// Temporarily commented out to avoid index conflicts during migration
+// studentSchema.index(
+//   { classId: 1, rollNumber: 1 }, 
+//   { 
+//     unique: true, 
+//     partialFilterExpression: { classId: { $exists: true, $ne: null } }
+//   }
+// );
+
+// Index for efficient querying by class
+studentSchema.index({ classId: 1, status: 1 });
+
+// Index for faculty queries
+studentSchema.index({ facultyId: 1, status: 1 });
+
+// Index for department queries
+studentSchema.index({ department: 1, status: 1 });
+
+// Legacy index for batch-based queries (for backward compatibility)
+// Temporarily commented out to avoid index conflicts during migration
+// studentSchema.index({ batch: 1, rollNumber: 1 }, { 
+//   unique: true,
+//   partialFilterExpression: { classId: { $exists: false } }
+// });
 
 // Remove password from JSON output (legacy safety if present)
 studentSchema.methods.toJSON = function() {

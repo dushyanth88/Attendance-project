@@ -5,6 +5,7 @@ import { apiFetch } from '../utils/apiFetch';
 import Toast from '../components/Toast';
 import AddStudentModal from '../components/AddStudentModal';
 import EditStudentModal from '../components/EditStudentModal';
+import BulkUploadModal from '../components/BulkUploadModal';
 
 const StudentManagementPage = () => {
   const { user } = useAuth();
@@ -22,6 +23,7 @@ const StudentManagementPage = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredStudents, setFilteredStudents] = useState([]);
@@ -225,6 +227,24 @@ const StudentManagementPage = () => {
     }
   };
 
+  const handleBulkUpload = () => {
+    setShowBulkUploadModal(true);
+  };
+
+  const closeBulkUploadModal = () => {
+    setShowBulkUploadModal(false);
+  };
+
+  const handleStudentsAdded = () => {
+    // Refresh the students list after bulk upload
+    setRefreshTrigger(prev => prev + 1);
+    setToast({
+      show: true,
+      message: 'Students list refreshed successfully!',
+      type: 'success'
+    });
+  };
+
   if (facultyProfile && !facultyProfile.is_class_advisor) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -282,6 +302,15 @@ const StudentManagementPage = () => {
                 className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
               >
                 ← Back to Dashboard
+              </button>
+              <button
+                onClick={handleBulkUpload}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                Bulk Upload
               </button>
               <button
                 onClick={() => setShowAddModal(true)}
@@ -473,6 +502,15 @@ const StudentManagementPage = () => {
           onClose={() => setShowEditModal(false)}
           onStudentUpdated={handleStudentUpdated}
           student={editingStudent}
+        />
+      )}
+
+      {showBulkUploadModal && (
+        <BulkUploadModal
+          isOpen={showBulkUploadModal}
+          onClose={closeBulkUploadModal}
+          onStudentsAdded={handleStudentsAdded}
+          classInfo={{ batch, year, semester, section: 'A', department }}
         />
       )}
 

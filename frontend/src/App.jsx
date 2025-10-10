@@ -7,6 +7,7 @@ import AdminDashboard from './pages/dashboards/AdminDashboard';
 import PrincipalDashboard from './pages/dashboards/PrincipalDashboard';
 import HODDashboard from './pages/dashboards/HODDashboard';
 import FacultyDashboard from './pages/dashboards/FacultyDashboard';
+import ClassAttendanceManagement from './pages/ClassAttendanceManagement';
 import StudentDashboard from './pages/dashboards/StudentDashboard';
 import ClassManagementPage from './pages/ClassManagementPage';
 import ClassSelectionPage from './pages/ClassSelectionPage';
@@ -56,6 +57,14 @@ const AppRoutes = () => {
               element={
                 <ProtectedRoute allowedRoles={['faculty']}>
                   <FacultyDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/faculty/class/:classId" 
+              element={
+                <ProtectedRoute allowedRoles={['faculty']}>
+                  <ClassAttendanceManagement />
                 </ProtectedRoute>
               } 
             />

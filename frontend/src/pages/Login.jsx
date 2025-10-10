@@ -54,7 +54,7 @@ const Login = () => {
         admin: '/admin/dashboard',
         principal: '/principal/dashboard',
         hod: '/hod/dashboard',
-        faculty: '/faculty/dashboard',
+        faculty: '/class-management', // Redirect faculty to class management page
         student: '/student/dashboard'
       };
       navigate(roleRoutes[formData.role] || '/dashboard');

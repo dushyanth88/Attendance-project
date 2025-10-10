@@ -9,10 +9,14 @@ import facultyRoutes from './routes/faculty.js';
 import studentRoutes from './routes/student.js';
 import reportRoutes from './routes/report.js';
 import holidayRoutes from './routes/holiday.js';
+import bulkUploadRoutes from './routes/bulkUpload.js';
+import studentBulkUploadRoutes from './routes/studentBulkUpload.js';
+import classAssignmentRoutes from './routes/classAssignment.js';
 import config from './config/config.js';
 import Student from './models/Student.js';
 import Attendance from './models/Attendance.js';
 import Holiday from './models/Holiday.js';
+import Faculty from './models/Faculty.js';
 
 // Load environment variables
 dotenv.config();
@@ -31,6 +35,9 @@ try {
   Holiday.syncIndexes()
     .then(() => console.log('✅ Holiday indexes synced'))
     .catch(err => console.error('⚠️  Holiday index sync error:', err?.message || err));
+  Faculty.syncIndexes()
+    .then(() => console.log('✅ Faculty indexes synced'))
+    .catch(err => console.error('⚠️  Faculty index sync error:', err?.message || err));
 } catch (e) {
   console.error('⚠️  Index sync init error:', e?.message || e);
 }
@@ -40,7 +47,7 @@ const PORT = config.PORT;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -62,6 +69,9 @@ app.use('/api/students', studentRoutes);
 app.use('/api/classes', studentRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/holidays', holidayRoutes);
+app.use('/api/bulk-upload', bulkUploadRoutes);
+app.use('/api/students', studentBulkUploadRoutes);
+app.use('/api/class-assignment', classAssignmentRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

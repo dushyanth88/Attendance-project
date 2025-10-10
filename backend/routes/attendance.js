@@ -4,6 +4,7 @@ import Attendance from '../models/Attendance.js';
 import User from '../models/User.js';
 import Student from '../models/Student.js';
 import Faculty from '../models/Faculty.js';
+import ClassAssignment from '../models/ClassAssignment.js';
 import { authenticate, facultyAndAbove, hodAndAbove, principalAndAbove, verifyToken } from '../middleware/auth.js';
 import ClassAttendance from '../models/ClassAttendance.js';
 import { getCurrentISTDate, getISTStartOfDay, getISTEndOfDay, getAttendanceDate, createISTExactDateFilter, getCurrentISTTimestamp } from '../utils/istTimezone.js';
@@ -47,6 +48,288 @@ const makeClassKey = ({ batch, year, semester, section }) => {
 
 // SSE clients mapped by student userId => Set of response streams
 const studentSseClients = new Map();
+
+// @desc    Mark attendance for a specific class (faculty class management)
+// @route   POST /api/attendance/mark-class
+// @access  Faculty and above
+router.post('/mark-class', [
+  body('facultyId').isMongoId().withMessage('Valid faculty ID is required'),
+  body('batch').notEmpty().withMessage('Batch is required'),
+  body('year').notEmpty().withMessage('Year is required'),
+  body('semester').notEmpty().withMessage('Semester is required'),
+  body('section').notEmpty().withMessage('Section is required'),
+  body('date').isISO8601().withMessage('Valid date is required'),
+  body('attendance').isArray().withMessage('Attendance must be an array'),
+  body('attendance.*.studentId').isMongoId().withMessage('Valid student ID is required'),
+  body('attendance.*.status').isIn(['Present', 'Absent']).withMessage('Status must be Present or Absent')
+], authenticate, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { facultyId, batch, year, semester, section, date, attendance } = req.body;
+    const currentUser = req.user;
+
+    // Verify faculty is assigned to this class
+    const faculty = await Faculty.findOne({
+      _id: facultyId,
+      'classAdvisors.batch': batch,
+      'classAdvisors.year': year,
+      'classAdvisors.semester': semester,
+      'classAdvisors.section': section,
+      'classAdvisors.isActive': true
+    });
+
+    if (!faculty) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You are not assigned as class advisor for this section'
+      });
+    }
+
+    // Convert date to IST
+    const istDate = getCurrentISTDate(date);
+    const attendanceDate = getAttendanceDate(istDate);
+
+    // Check if attendance already exists for this class and date
+    const existingAttendance = await Attendance.findOne({
+      batch,
+      year,
+      semester,
+      section,
+      date: attendanceDate,
+      facultyId
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Attendance already marked for this class and date',
+        data: { existingAttendanceId: existingAttendance._id }
+      });
+    }
+
+    // Create new attendance record
+    const newAttendance = new Attendance({
+      facultyId,
+      batch,
+      year,
+      semester,
+      section,
+      date: attendanceDate,
+      attendance: attendance.map(record => ({
+        studentId: record.studentId,
+        status: record.status
+      })),
+      createdAt: getCurrentISTTimestamp(),
+      updatedAt: getCurrentISTTimestamp()
+    });
+
+    await newAttendance.save();
+
+    // Calculate statistics
+    const presentCount = attendance.filter(record => record.status === 'Present').length;
+    const absentCount = attendance.filter(record => record.status === 'Absent').length;
+    const totalStudents = attendance.length;
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Attendance marked successfully',
+      data: {
+        attendanceId: newAttendance._id,
+        classInfo: {
+          batch,
+          year,
+          semester,
+          section
+        },
+        statistics: {
+          totalStudents,
+          presentCount,
+          absentCount,
+          attendancePercentage: totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0
+        },
+        date: attendanceDate
+      }
+    });
+  } catch (error) {
+    console.error('Error marking class attendance:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while marking attendance'
+    });
+  }
+});
+
+// @desc    Get students for a specific class
+// @route   GET /api/attendance/class-students
+// @access  Faculty and above
+router.get('/class-students', authenticate, async (req, res) => {
+  try {
+    const { batch, year, semester, section } = req.query;
+    const currentUser = req.user;
+
+    if (!batch || !year || !semester || !section) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Batch, year, semester, and section are required'
+      });
+    }
+
+    // Verify faculty is assigned to this class
+    const faculty = await Faculty.findOne({
+      _id: currentUser._id,
+      'classAdvisors.batch': batch,
+      'classAdvisors.year': year,
+      'classAdvisors.semester': semester,
+      'classAdvisors.section': section,
+      'classAdvisors.isActive': true
+    });
+
+    if (!faculty) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You are not assigned as class advisor for this section'
+      });
+    }
+
+    // Get students for this class
+    const students = await Student.find({
+      batch,
+      year,
+      semester,
+      section,
+      department: currentUser.department
+    }).select('name email rollNumber mobile batch year semester section department')
+     .sort({ rollNumber: 1 });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        students,
+        totalStudents: students.length,
+        classInfo: {
+          batch,
+          year,
+          semester,
+          section,
+          department: currentUser.department
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching class students:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while fetching class students'
+    });
+  }
+});
+
+// @desc    Get attendance history for a specific class
+// @route   GET /api/attendance/class-history
+// @access  Faculty and above
+router.get('/class-history', authenticate, async (req, res) => {
+  try {
+    const { batch, year, semester, section, startDate, endDate } = req.query;
+    const currentUser = req.user;
+
+    if (!batch || !year || !semester || !section) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Batch, year, semester, and section are required'
+      });
+    }
+
+    // Verify faculty is assigned to this class
+    const faculty = await Faculty.findOne({
+      _id: currentUser._id,
+      'classAdvisors.batch': batch,
+      'classAdvisors.year': year,
+      'classAdvisors.semester': semester,
+      'classAdvisors.section': section,
+      'classAdvisors.isActive': true
+    });
+
+    if (!faculty) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You are not assigned as class advisor for this section'
+      });
+    }
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate) {
+      const startIST = getISTStartOfDay(startDate);
+      const endIST = getISTEndOfDay(endDate);
+      dateFilter = {
+        date: {
+          $gte: startIST,
+          $lte: endIST
+        }
+      };
+    } else if (startDate) {
+      const startIST = getISTStartOfDay(startDate);
+      dateFilter = { date: { $gte: startIST } };
+    } else if (endDate) {
+      const endIST = getISTEndOfDay(endDate);
+      dateFilter = { date: { $lte: endIST } };
+    }
+
+    // Get attendance records for this class
+    const attendanceRecords = await Attendance.find({
+      batch,
+      year,
+      semester,
+      section,
+      facultyId: currentUser._id,
+      ...dateFilter
+    })
+    .populate('attendance.studentId', 'name rollNumber')
+    .sort({ date: -1 });
+
+    // Calculate statistics
+    const totalRecords = attendanceRecords.length;
+    const totalPresent = attendanceRecords.reduce((sum, record) => {
+      return sum + record.attendance.filter(att => att.status === 'Present').length;
+    }, 0);
+    const totalAbsent = attendanceRecords.reduce((sum, record) => {
+      return sum + record.attendance.filter(att => att.status === 'Absent').length;
+    }, 0);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        attendanceRecords,
+        totalRecords,
+        statistics: {
+          totalPresent,
+          totalAbsent,
+          averageAttendance: totalRecords > 0 ? Math.round((totalPresent / (totalPresent + totalAbsent)) * 100) : 0
+        },
+        classInfo: {
+          batch,
+          year,
+          semester,
+          section
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching class attendance history:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while fetching attendance history'
+    });
+  }
+});
 
 const addSseClient = (studentUserId, res) => {
   if (!studentSseClients.has(studentUserId)) {
@@ -1357,6 +1640,103 @@ router.put('/:id/reason', authenticate, facultyAndAbove, [
     res.status(500).json({
       status: 'error',
       message: 'Server error'
+    });
+  }
+});
+
+// @desc    Generate attendance report
+// @route   GET /api/attendance/report
+// @access  Faculty and above
+router.get('/report', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const { batch, year, semester, section, startDate, endDate } = req.query;
+    const currentUser = req.user;
+
+    console.log('📊 Report request:', { batch, year, semester, section, startDate, endDate, userId: currentUser._id });
+
+    if (!batch || !year || !semester || !section) {
+      return res.status(400).json({
+        success: false,
+        message: 'Batch, year, semester, and section are required'
+      });
+    }
+
+    // Check if faculty has access to this class
+    const classAssignment = await ClassAssignment.findOne({
+      facultyId: currentUser._id,
+      batch,
+      year,
+      semester: parseInt(semester),
+      section,
+      active: true
+    });
+
+    if (!classAssignment) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to generate reports for this class'
+      });
+    }
+
+    // Build date filter
+    const dateFilter = {};
+    if (startDate) {
+      dateFilter.date = { ...dateFilter.date, $gte: new Date(startDate) };
+    }
+    if (endDate) {
+      dateFilter.date = { ...dateFilter.date, $lte: new Date(endDate) };
+    }
+
+    // Fetch attendance records
+    const attendanceRecords = await Attendance.find({
+      batch,
+      year,
+      semester: parseInt(semester),
+      section,
+      ...dateFilter
+    }).sort({ date: 1 });
+
+    // Calculate statistics
+    const totalDays = attendanceRecords.length;
+    const totalStudents = attendanceRecords.length > 0 ? attendanceRecords[0].totalStudents : 0;
+    const totalPresent = attendanceRecords.reduce((sum, record) => sum + record.presentCount, 0);
+    const averageAttendance = totalDays > 0 ? (totalPresent / (totalDays * totalStudents)) * 100 : 0;
+
+    // Prepare report data
+    const reportData = {
+      classInfo: {
+        batch,
+        year,
+        semester: parseInt(semester),
+        section
+      },
+      summary: {
+        totalDays,
+        totalStudents,
+        totalPresent,
+        averageAttendance: Math.round(averageAttendance * 100) / 100
+      },
+      records: attendanceRecords.map(record => ({
+        date: record.date,
+        presentCount: record.presentCount,
+        absentCount: record.totalStudents - record.presentCount,
+        totalStudents: record.totalStudents,
+        percentage: Math.round((record.presentCount / record.totalStudents) * 100 * 100) / 100
+      }))
+    };
+
+    console.log('✅ Report generated:', reportData.summary);
+
+    res.json({
+      success: true,
+      data: reportData
+    });
+
+  } catch (error) {
+    console.error('Error generating attendance report:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while generating report'
     });
   }
 });

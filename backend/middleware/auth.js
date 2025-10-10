@@ -127,8 +127,8 @@ export const adminOnly = authorize('admin');
 // Faculty and above middleware
 export const facultyAndAbove = authorize('admin', 'principal', 'hod', 'faculty');
 
-// HOD and above middleware
-export const hodAndAbove = authorize('admin', 'principal', 'hod');
+// HOD and above middleware (including faculty)
+export const hodAndAbove = authorize('admin', 'principal', 'hod', 'faculty');
 
 // Principal and above middleware
 export const principalAndAbove = authorize('admin', 'principal');

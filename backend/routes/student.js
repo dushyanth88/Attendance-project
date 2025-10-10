@@ -5,6 +5,7 @@ import Faculty from '../models/Faculty.js';
 import User from '../models/User.js';
 import Attendance from '../models/Attendance.js';
 import { authenticate, facultyAndAbove } from '../middleware/auth.js';
+import { resolveFacultyId, validateFacultyClassBinding, createAuditLog } from '../services/facultyResolutionService.js';
 
 const router = express.Router();
 
@@ -61,7 +62,7 @@ const parseSemesterNumber = (normalizedSemester) => {
 // @desc    Fetch students for assigned class (by batch/year/semester[/section])
 // @route   GET /api/students?batch=YYYY-YYYY&year=2nd%20Year|1&semester=3|Sem%203[&section=A]
 // @access  Faculty (Class Advisor) and above
-router.get('/', async (req, res) => {
+router.get('/', authenticate, facultyAndAbove, async (req, res) => {
   try {
     const { batch, year, semester, section } = req.query;
     if (!batch || !year || !semester) {
@@ -93,20 +94,124 @@ router.get('/', async (req, res) => {
       });
     }
 
-    const students = await Student.find({
+    // Build query with classId for better filtering - same format as bulk upload
+    // Format: batch_year_semester_section (e.g., "2024-2028_1st Year_Sem 1_A")
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section || 'A'}`;
+    
+    console.log('🔍 Fetching students with query:', {
       batch,
       year: normalizedYear,
       semester: normalizedSemester,
       department: req.user.department,
-      status: 'active'
+      facultyId: faculty._id,
+      section: section || 'A',
+      classId
+    });
+    
+    console.log('👤 Faculty details:', {
+      id: faculty._id,
+      name: faculty.name,
+      batch: faculty.batch,
+      year: faculty.year,
+      department: faculty.department
+    });
+    
+    // Build comprehensive query with faculty-class binding integrity
+    // First try with classId, then fallback to individual fields
+    let query = {
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: req.user.department,
+      facultyId: faculty._id, // Only show students created by this faculty
+      ...(section ? { section } : {}), // Add section filter if provided
+      status: 'active' // Exclude soft-deleted students
+    };
+    
+    // Try to find students with classId first
+    let students = await Student.find({
+      ...query,
+      classId: classId
     })
-      .select('userId rollNumber name email mobile year semester batch department')
+      .select('userId rollNumber name email mobile year semester batch department classId facultyId createdBy createdAt')
       .sort({ rollNumber: 1 });
 
+    // If no students found with classId, try without classId filter (for backward compatibility)
+    if (students.length === 0) {
+      console.log('⚠️ No students found with classId, trying without classId filter...');
+      students = await Student.find(query)
+        .select('userId rollNumber name email mobile year semester batch department classId facultyId createdBy createdAt')
+        .sort({ rollNumber: 1 });
+    }
+    
+    console.log('🔍 Final query:', JSON.stringify(query, null, 2));
+
+    console.log(`📊 Found ${students.length} students for class ${classId}`);
+    
+    if (students.length > 0) {
+      console.log('📋 Sample students found:');
+      students.slice(0, 3).forEach((student, index) => {
+        console.log(`  ${index + 1}. ${student.rollNumber} - ${student.name} (classId: ${student.classId})`);
+      });
+    } else {
+      console.log('❌ No students found. Checking for students with similar criteria...');
+      
+      // Check for students with similar criteria
+      const similarStudents = await Student.find({
+        batch,
+        department: req.user.department,
+        facultyId: faculty._id,
+        status: 'active'
+      }).limit(5);
+      
+      console.log(`🔍 Found ${similarStudents.length} students with similar criteria:`);
+      similarStudents.forEach((student, index) => {
+        console.log(`  ${index + 1}. ${student.rollNumber} - ${student.name}`);
+        console.log(`     ClassId: ${student.classId || 'NULL'}`);
+        console.log(`     Year: ${student.year}, Semester: ${student.semester}, Section: ${student.section || 'NULL'}`);
+      });
+      
+      // Also check for students with exact batch/year/semester but different faculty
+      const exactMatchStudents = await Student.find({
+        batch,
+        year: normalizedYear,
+        semester: normalizedSemester,
+        department: req.user.department,
+        status: 'active'
+      }).limit(5);
+      
+      console.log(`🔍 Found ${exactMatchStudents.length} students with exact batch/year/semester match:`);
+      exactMatchStudents.forEach((student, index) => {
+        console.log(`  ${index + 1}. ${student.rollNumber} - ${student.name}`);
+        console.log(`     FacultyId: ${student.facultyId} (Expected: ${faculty._id})`);
+        console.log(`     ClassId: ${student.classId || 'NULL'}`);
+      });
+    }
+
+    // Validate data integrity before mapping (more flexible for backward compatibility)
+    const validStudents = students.filter(student => {
+      const isValid = student.rollNumber && student.name && student.email;
+      if (!isValid) {
+        console.warn('Invalid student data found in database:', {
+          id: student._id,
+          rollNumber: student.rollNumber,
+          name: student.name,
+          email: student.email,
+          classId: student.classId,
+          facultyId: student.facultyId
+        });
+      }
+      return isValid;
+    });
+    
+    if (validStudents.length !== students.length) {
+      console.warn(`Filtered out ${students.length - validStudents.length} invalid students from database`);
+    }
+    
     // Map to expected response shape
     const yearNumber = parseYearNumber(normalizedYear);
     const semesterNumber = parseSemesterNumber(normalizedSemester);
-    const data = students.map(s => ({
+    const data = validStudents.map(s => ({
       id: s._id, // Use Student document ID for API consistency
       _id: s._id, // Also include _id for compatibility
       userId: s.userId, // Include userId for reference
@@ -121,7 +226,12 @@ router.get('/', async (req, res) => {
       batch: s.batch,
       year: yearNumber,
       semester: semesterNumber,
-      section: faculty?.section || undefined
+      section: faculty?.section || undefined,
+      classId: s.classId, // Include classId for validation
+      facultyId: s.facultyId, // Include facultyId for validation
+      createdBy: s.createdBy, // Include createdBy for validation
+      createdAt: s.createdAt, // Include createdAt for validation
+      parentContact: s.parentContact || '' // Include parentContact
     }));
 
     return res.status(200).json({
@@ -140,7 +250,7 @@ router.get('/', async (req, res) => {
 // @desc    Create new student
 // @route   POST /api/students
 // @access  Faculty (Class Advisor) and above
-router.post('/', [
+router.post('/', authenticate, facultyAndAbove, [
   body('roll_number').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
   body('rollNumber').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
   body('rollNo').optional().isString().trim().isLength({ min: 1 }).withMessage('Roll number is required'),
@@ -203,20 +313,62 @@ router.post('/', [
       }
     }
 
-    // Verify authorization: must be class advisor for this batch/year/semester
-    const faculty = await Faculty.findOne({
-      userId: req.user._id,
-      is_class_advisor: true,
+    // Resolve faculty ID using centralized service
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${bodyData.section || 'A'}`;
+    
+    const facultyResolution = await resolveFacultyId({
+      user: req.user,
+      classId,
       batch,
       year: normalizedYear,
-      semester: parseInt(String(bodyData.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
-      department: req.user.department,
-      status: 'active'
+      semester: normalizedSemester,
+      section: bodyData.section || 'A',
+      department: req.user.department
     });
-
-    if (!faculty) {
-      return res.status(403).json({ success: false, message: 'You are not authorized to create students for this class' });
+    
+    const { facultyId, faculty, source } = facultyResolution;
+    
+    console.log('👨‍🏫 Faculty resolved for manual creation:', {
+      facultyId,
+      source,
+      facultyName: faculty.name
+    });
+    
+    // Validate faculty-class binding
+    const classMetadata = {
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      section: bodyData.section || 'A',
+      department: req.user.department
+    };
+    
+    const isValidBinding = await validateFacultyClassBinding(facultyId, classId, classMetadata);
+    
+    if (!isValidBinding) {
+      return res.status(403).json({
+        success: false,
+        message: 'Faculty not authorized for this class'
+      });
     }
+    
+    // Create audit log
+    await createAuditLog({
+      operation: 'manual_create',
+      facultyId,
+      classId,
+      source,
+      userId: req.user._id,
+      details: {
+        batch,
+        year: normalizedYear,
+        semester: normalizedSemester,
+        section: bodyData.section || 'A',
+        department: req.user.department,
+        facultyName: faculty.name,
+        validationPassed: true
+      }
+    });
 
     // Check email uniqueness across users
     const existingUser = await User.findOne({ email });
@@ -264,11 +416,34 @@ router.post('/', [
       year: normalizedYear,
       semester: normalizedSemester,
       classAssigned: '1A', // legacy field required by schema; not used in this flow
-      facultyId: faculty._id,
+      facultyId: facultyId,
       department: req.user.department,
       createdBy: req.user._id
     });
     await student.save();
+
+    // Create final audit log with student details
+    await createAuditLog({
+      operation: 'manual_create',
+      facultyId,
+      classId,
+      source,
+      userId: req.user._id,
+      studentCount: 1,
+      studentIds: [student._id],
+      details: {
+        batch,
+        year: normalizedYear,
+        semester: normalizedSemester,
+        section: bodyData.section || 'A',
+        department: req.user.department,
+        facultyName: faculty.name,
+        validationPassed: true,
+        studentName: student.name,
+        studentRollNumber: student.rollNumber
+      },
+      status: 'success'
+    });
 
     const response = {
       id: student._id,
@@ -292,48 +467,12 @@ router.post('/', [
   }
 });
 
-// @desc    Delete student (removes from both Users & Students)
-// @route   DELETE /api/students/:id
-// @access  Faculty (Class Advisor) and above
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const student = await Student.findById(id);
-    if (!student) {
-      return res.status(404).json({ success: false, message: 'Student not found' });
-    }
-
-    // Verify faculty is authorized for this student's class
-    const faculty = await Faculty.findOne({
-      userId: req.user._id,
-      is_class_advisor: true,
-      batch: student.batch,
-      year: student.year,
-      department: req.user.department,
-      status: 'active'
-    });
-
-    if (!faculty) {
-      return res.status(403).json({ success: false, message: 'You are not authorized to delete this student' });
-    }
-
-    // Delete linked user
-    await User.findByIdAndDelete(student.userId);
-    // Delete student
-    await Student.findByIdAndDelete(id);
-
-    return res.status(200).json({ success: true, message: 'Student deleted successfully' });
-  } catch (error) {
-    console.error('DELETE /api/students/:id error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
 
 // @desc    Create new student
 // @route   POST /api/student/create
 // @route   POST /api/students/add (alias)
 // @access  Faculty and above
-router.post('/create', [
+router.post('/create', authenticate, facultyAndAbove, [
   body('rollNumber').trim().isLength({ min: 1, max: 20 }).withMessage('Roll number is required'),
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
@@ -433,7 +572,7 @@ router.post('/create', [
 // @desc    Create new student (alias route)
 // @route   POST /api/students/add
 // @access  Faculty and above
-router.post('/add', [
+router.post('/add', authenticate, facultyAndAbove, [
   body('rollNo').trim().isLength({ min: 1, max: 20 }).withMessage('Roll number is required'),
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
@@ -519,6 +658,192 @@ router.post('/add', [
     }
     res.status(500).json({
       status: 'error',
+      message: 'Server error'
+    });
+  }
+});
+
+// @desc    Update student details
+// @route   PUT /api/students/:id
+// @access  Faculty (Class Advisor) and above
+router.put('/:id', authenticate, facultyAndAbove, [
+  body('name').optional().trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  body('email').optional().isEmail().normalizeEmail().withMessage('Please enter a valid email'),
+  body('mobile').optional().matches(/^[0-9]{10}$/).withMessage('Mobile number must be exactly 10 digits'),
+  body('parentContact').optional().matches(/^[0-9]{10}$/).withMessage('Parent contact must be exactly 10 digits'),
+  body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { id } = req.params;
+    const { name, email, mobile, parentContact, password } = req.body;
+
+    // Find the student
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Verify faculty is authorized to edit this student
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+      is_class_advisor: true,
+      batch: student.batch,
+      year: student.year,
+      semester: parseInt(String(student.semester).match(/\d+/)?.[0] || '0', 10),
+      department: req.user.department,
+      status: 'active'
+    });
+
+    if (!faculty || faculty._id.toString() !== student.facultyId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to edit this student'
+      });
+    }
+
+    // Check for email uniqueness if email is being updated
+    if (email && email !== student.email) {
+      const existingStudent = await Student.findOne({
+        email: email.toLowerCase(),
+        _id: { $ne: id }
+      });
+      if (existingStudent) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already exists for another student'
+        });
+      }
+    }
+
+    // Update student details
+    const updateData = {};
+    if (name) updateData.name = name.trim();
+    if (email) updateData.email = email.toLowerCase();
+    if (mobile) updateData.mobile = mobile;
+    if (parentContact) updateData.parentContact = parentContact;
+
+    const updatedStudent = await Student.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('userId rollNumber name email mobile parentContact year semester batch department');
+
+    // Update corresponding user record
+    const userUpdateData = {};
+    if (name) userUpdateData.name = name.trim();
+    if (email) userUpdateData.email = email.toLowerCase();
+    if (password) userUpdateData.password = password; // Will be hashed by pre-save hook
+
+    if (Object.keys(userUpdateData).length > 0) {
+      await User.findByIdAndUpdate(student.userId, userUpdateData, { runValidators: true });
+    }
+
+    // Log the update
+    console.log(`Student updated by faculty ${req.user._id}: ${student.rollNumber} - ${student.name}`);
+
+    res.json({
+      success: true,
+      message: 'Student updated successfully',
+      data: {
+        id: updatedStudent._id,
+        rollNumber: updatedStudent.rollNumber,
+        name: updatedStudent.name,
+        email: updatedStudent.email,
+        mobile: updatedStudent.mobile || '',
+        parentContact: updatedStudent.parentContact || '',
+        department: updatedStudent.department,
+        batch: updatedStudent.batch,
+        year: updatedStudent.year,
+        semester: updatedStudent.semester
+      }
+    });
+
+  } catch (error) {
+    console.error('Update student error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// @desc    Delete student
+// @route   DELETE /api/students/:id
+// @access  Faculty (Class Advisor) and above
+router.delete('/:id', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the student
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Verify faculty is authorized to delete this student
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+      is_class_advisor: true,
+      batch: student.batch,
+      year: student.year,
+      semester: parseInt(String(student.semester).match(/\d+/)?.[0] || '0', 10),
+      department: req.user.department,
+      status: 'active'
+    });
+
+    if (!faculty || faculty._id.toString() !== student.facultyId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this student'
+      });
+    }
+
+    // Soft delete: Mark student as inactive instead of hard delete
+    await Student.findByIdAndUpdate(id, { 
+      status: 'inactive',
+      deletedAt: new Date(),
+      deletedBy: req.user._id
+    });
+
+    // Also mark user as inactive
+    await User.findByIdAndUpdate(student.userId, { 
+      status: 'inactive',
+      deletedAt: new Date(),
+      deletedBy: req.user._id
+    });
+
+    // Log the deletion
+    console.log(`Student soft deleted by faculty ${req.user._id}: ${student.rollNumber} - ${student.name}`);
+
+    res.json({
+      success: true,
+      message: 'Student deleted successfully',
+      data: {
+        id: student._id,
+        rollNumber: student.rollNumber,
+        name: student.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Delete student error:', error);
+    res.status(500).json({
+      success: false,
       message: 'Server error'
     });
   }
@@ -791,33 +1116,6 @@ router.put('/update/:id', [
   }
 });
 
-// @desc    Delete student
-// @route   DELETE /api/student/delete/:id
-// @access  Faculty and above
-router.delete('/delete/:id', async (req, res) => {
-  try {
-    const student = await Student.findById(req.params.id);
-    if (!student) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Student not found'
-      });
-    }
-
-    await Student.findByIdAndDelete(req.params.id);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Student deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete student error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Server error'
-    });
-  }
-});
 
 // @desc    Test route for class management
 // @route   GET /api/classes/test
