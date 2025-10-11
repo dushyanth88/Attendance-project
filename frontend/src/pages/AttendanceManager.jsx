@@ -131,18 +131,22 @@ const AttendanceManager = () => {
       const istDate = new Date(today.getTime() + (5.5 * 60 * 60 * 1000));
       const istDateString = istDate.toISOString().split('T')[0];
 
+      const requestData = {
+        batch: classInfo.batch,
+        year: classInfo.year,
+        semester: classInfo.semester,
+        section: classInfo.section,
+        date: istDateString,
+        absentRollNumbers
+      };
+
+      console.log('📤 Sending attendance data:', requestData);
+      console.log('📤 Class info:', classInfo);
+
       const response = await apiFetch({
         url: '/api/attendance/mark-students',
         method: 'POST',
-        data: {
-          facultyId: classInfo.facultyId,
-          batch: classInfo.batch,
-          year: classInfo.year,
-          semester: classInfo.semester,
-          section: classInfo.section,
-          date: istDateString,
-          absentRollNumbers
-        }
+        data: requestData
       });
 
       if (response.data.status === 'success') {
@@ -161,7 +165,34 @@ const AttendanceManager = () => {
       }
     } catch (error) {
       console.error('Error marking attendance:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to mark attendance';
+      console.error('Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        config: error.config
+      });
+      
+      let errorMessage = 'Failed to mark attendance';
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.msg) {
+        errorMessage = error.response.data.msg;
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+        errorMessage = 'Network error: Unable to connect to server. Please check your connection.';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Authentication failed. Please log in again.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Access denied. You are not authorized to mark attendance for this class.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Class or students not found. Please check your class assignment.';
+      } else if (error.response?.status === 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
       setToast({ show: true, message: errorMessage, type: 'error' });
     } finally {
       setLoading(false);

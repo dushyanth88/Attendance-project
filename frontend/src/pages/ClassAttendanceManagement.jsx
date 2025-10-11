@@ -84,7 +84,6 @@ const ClassAttendanceManagement = () => {
 
   const tabs = [
     { id: 'mark', label: 'Mark Attendance', icon: '📝' },
-    { id: 'edit', label: 'Edit Attendance', icon: '✏️' },
     { id: 'history', label: 'Attendance History', icon: '📊' },
     { id: 'report', label: 'Generate Report', icon: '📈' },
     { id: 'students', label: 'Student Management', icon: '👥' }
@@ -196,13 +195,6 @@ const ClassAttendanceManagement = () => {
             onStudentsUpdate={setStudents}
           />
         )}
-        {activeTab === 'edit' && (
-          <EditAttendanceTab 
-            classData={classData} 
-            students={students} 
-            onToast={showToast}
-          />
-        )}
         {activeTab === 'history' && (
           <AttendanceHistoryTab 
             classData={classData} 
@@ -237,14 +229,92 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
     absentees: ''
   });
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceMarked, setAttendanceMarked] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [studentAttendanceStatus, setStudentAttendanceStatus] = useState({});
+
+  // Filter students based on search term
+  const filteredStudents = students.filter(student => {
+    if (!searchTerm) return true;
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      student.rollNumber?.toLowerCase().includes(searchLower) ||
+      student.name?.toLowerCase().includes(searchLower) ||
+      student.email?.toLowerCase().includes(searchLower)
+    );
+  });
+
+  // Check if attendance has been marked for today
+  const checkAttendanceStatus = async () => {
+    try {
+      const todayISO = new Date().toISOString().split('T')[0];
+      const response = await apiFetch({
+        url: `/api/attendance/history-by-class?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&date=${todayISO}`,
+        method: 'GET'
+      });
+
+      if (response.data.status === 'success' && response.data.data && response.data.data.records && response.data.data.records.length > 0) {
+        // Check if any student has attendance marked (not "Not Marked")
+        const hasMarkedAttendance = response.data.data.records.some(record => record.status !== 'Not Marked');
+        setAttendanceMarked(hasMarkedAttendance);
+      } else {
+        setAttendanceMarked(false);
+      }
+    } catch (error) {
+      console.error('Error checking attendance status:', error);
+      setAttendanceMarked(false);
+    }
+  };
+
+  // Fetch today's attendance status for all students
+  const fetchStudentAttendanceStatus = async () => {
+    try {
+      const todayISO = new Date().toISOString().split('T')[0];
+      const response = await apiFetch({
+        url: `/api/attendance/history-by-class?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&date=${todayISO}`,
+        method: 'GET'
+      });
+
+      if (response.data.status === 'success' && response.data.data && response.data.data.records) {
+        const attendanceMap = {};
+        response.data.data.records.forEach(record => {
+          attendanceMap[record.rollNo] = record.status;
+        });
+        setStudentAttendanceStatus(attendanceMap);
+      } else {
+        setStudentAttendanceStatus({});
+      }
+    } catch (error) {
+      console.error('Error fetching student attendance status:', error);
+      setStudentAttendanceStatus({});
+    }
+  };
+
+  // Check attendance status when component loads
+  useEffect(() => {
+    checkAttendanceStatus();
+    fetchStudentAttendanceStatus();
+  }, [classData, students]);
 
   const handleAttendanceChange = (e) => {
     const { name, value } = e.target;
     setAttendanceForm(prev => ({ ...prev, [name]: value }));
   };
 
-  // Calculate present count in real-time
-  const presentCount = Math.max(0, students.length - (attendanceForm.absentees.split(',').filter(id => id.trim()).length));
+  const handleEditMode = () => {
+    setEditMode(true);
+    setAttendanceMarked(false); // Allow editing
+  };
+
+  const handleCancelEdit = () => {
+    setEditMode(false);
+    setAttendanceForm({ absentees: '' });
+    checkAttendanceStatus(); // Re-check attendance status
+  };
+
+  // Show total class strength (not dynamic calculation)
+  const totalClassStrength = students.length;
 
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
@@ -254,29 +324,88 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
       // Use today's date in ISO format for backend
       const todayISO = new Date().toISOString().split('T')[0];
       
+      // Parse absent roll numbers
+      const absentRollNumbers = (attendanceForm.absentees || '')
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const requestData = {
+        batch: classData.batch,
+        year: classData.year,
+        semester: parseInt(classData.semester), // Ensure semester is a number
+        section: classData.section || 'A', // Default to 'A' if section is undefined
+        date: todayISO,
+        absentRollNumbers
+      };
+
+      // Validate request data
+      if (!requestData.batch || !requestData.year || !requestData.semester) {
+        throw new Error('Missing required class information');
+      }
+
+      if (!/^\d{4}-\d{4}$/.test(requestData.batch)) {
+        throw new Error('Invalid batch format. Expected YYYY-YYYY');
+      }
+
+      if (!['1st Year', '2nd Year', '3rd Year', '4th Year'].includes(requestData.year)) {
+        throw new Error('Invalid year format');
+      }
+
+      if (isNaN(requestData.semester) || requestData.semester < 1 || requestData.semester > 8) {
+        throw new Error('Invalid semester. Must be a number between 1-8');
+      }
+
+      console.log('📤 Sending attendance data:', requestData);
+      console.log('📤 Class data:', classData);
+
       const response = await apiFetch({
-        url: '/api/attendance/mark',
+        url: '/api/attendance/mark-students',
         method: 'POST',
-        data: {
-          date: todayISO, // Use today's date in ISO format
-          absentees: attendanceForm.absentees,
-          batch: classData.batch,
-          year: classData.year,
-          semester: classData.semester,
-          section: classData.section,
-          department: classData.department
-        }
+        data: requestData
       });
 
-      if (response.data.success) {
+      if (response.data.status === 'success') {
         onToast('Attendance marked successfully!', 'success');
         setAttendanceForm(prev => ({ ...prev, absentees: '' }));
+        setAttendanceMarked(true);
+        setEditMode(false);
+        // Refresh attendance status after marking
+        fetchStudentAttendanceStatus();
       } else {
         onToast(response.data.message || 'Failed to mark attendance', 'error');
       }
     } catch (error) {
       console.error('Error marking attendance:', error);
-      onToast('Error marking attendance', 'error');
+      console.error('Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        config: error.config
+      });
+      
+      let errorMessage = 'Failed to mark attendance';
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.msg) {
+        errorMessage = error.response.data.msg;
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+        errorMessage = 'Network error: Unable to connect to server. Please check your connection.';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Authentication failed. Please log in again.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Access denied. You are not authorized to mark attendance for this class.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Class or students not found. Please check your class assignment.';
+      } else if (error.response?.status === 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
+      onToast(errorMessage, 'error');
     } finally {
       setAttendanceLoading(false);
     }
@@ -289,6 +418,27 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
         <p className="text-sm text-gray-500">Mark attendance for today's class</p>
               </div>
       <div className="p-6">
+        {/* Attendance Status Indicator */}
+        {attendanceMarked && !editMode && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-green-800">
+                  Attendance Already Marked
+                </h3>
+                <div className="mt-1 text-sm text-green-700">
+                  <p>Attendance has been marked for today. Use the "✏️ Edit Attendance" button to make changes.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleMarkAttendance} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -310,12 +460,12 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Total Students Present
+                Total Class Strength
               </label>
               <input
                 type="number"
                 name="present"
-                value={presentCount}
+                value={totalClassStrength}
                 readOnly
                 className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                 />
@@ -336,20 +486,83 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
               />
             </div>
 
-          <div className="flex justify-end">
-              <button
-                type="submit"
-              disabled={attendanceLoading}
-              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-              {attendanceLoading ? 'Marking...' : 'Mark Attendance'}
-              </button>
-            </div>
+          <div className="flex justify-end space-x-3">
+            {attendanceMarked && !editMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleEditMode}
+                  className="bg-yellow-600 text-white px-6 py-2 rounded-md hover:bg-yellow-700 transition-colors"
+                >
+                  ✏️ Edit Attendance
+                </button>
+                <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-md">
+                  ✅ Attendance Marked
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-md hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={attendanceLoading || (attendanceMarked && !editMode)}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {attendanceLoading ? 'Marking...' : editMode ? 'Update Attendance' : 'Mark Attendance'}
+                </button>
+              </>
+            )}
+          </div>
           </form>
 
         {/* Students List */}
         <div className="mt-8">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Students in Class</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900">
+              Students in Class
+            </h3>
+            <div className="text-sm text-gray-500">
+              {searchTerm ? (
+                `Showing ${filteredStudents.length} of ${students.length} students`
+              ) : (
+                `Total Strength: ${students.length} students`
+              )}
+            </div>
+          </div>
+          
+          {/* Search Bar */}
+          <div className="mb-4">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                placeholder="Search by roll number, name, or email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                >
+                  <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -363,132 +576,71 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Email
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Attendance Status
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {students.map((student) => (
-                  <tr key={student._id || student.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {student.rollNumber}
+                  {filteredStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="px-6 py-8 text-center text-gray-500">
+                        {searchTerm ? (
+                          <div>
+                            <div className="text-gray-400 text-4xl mb-2">🔍</div>
+                            <p className="text-lg font-medium">No students found</p>
+                            <p className="text-sm">No students match your search for "{searchTerm}"</p>
+                            <button
+                              onClick={() => setSearchTerm('')}
+                              className="mt-2 text-blue-600 hover:text-blue-800 text-sm underline"
+                            >
+                              Clear search
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-gray-400 text-4xl mb-2">👥</div>
+                            <p className="text-lg font-medium">No students in class</p>
+                            <p className="text-sm">No students are assigned to this class yet.</p>
+                          </div>
+                        )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {student.email}
-                      </td>
-                  </tr>
-                ))}
-              </tbody>
+                    </tr>
+                  ) : (
+                    filteredStudents.map((student) => (
+                      <tr key={student._id || student.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {student.rollNumber}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {student.name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {student.email}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {(() => {
+                            const status = studentAttendanceStatus[student.rollNumber] || 'Not Marked';
+                            return (
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                status === 'Present' ? 'bg-green-100 text-green-800' :
+                                status === 'Absent' ? 'bg-red-100 text-red-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {status === 'Present' ? '✅ Present' :
+                                 status === 'Absent' ? '❌ Absent' :
+                                 '⏳ Not Marked'}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
             </table>
           </div>
         </div>
-      </div>
-    </div>
-  );
-};
-
-// Edit Attendance Tab Component
-const EditAttendanceTab = ({ classData, students, onToast }) => {
-  const [attendanceRecords, setAttendanceRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState('');
-
-  useEffect(() => {
-    fetchAttendanceRecords();
-  }, []);
-
-  const fetchAttendanceRecords = async () => {
-    try {
-      setLoading(true);
-      const response = await apiFetch({
-        url: `/api/attendance/history?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}`,
-        method: 'GET'
-      });
-
-      if (response.data.success) {
-        setAttendanceRecords(response.data.data || []);
-      }
-    } catch (error) {
-      console.error('Error fetching attendance records:', error);
-      onToast('Error loading attendance records', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEditAttendance = async (recordId, updatedData) => {
-    try {
-      const response = await apiFetch({
-        url: `/api/attendance/${recordId}`,
-        method: 'PUT',
-        data: updatedData
-      });
-
-      if (response.data.success) {
-        onToast('Attendance updated successfully!', 'success');
-        fetchAttendanceRecords();
-      } else {
-        onToast(response.data.message || 'Failed to update attendance', 'error');
-      }
-    } catch (error) {
-      console.error('Error updating attendance:', error);
-      onToast('Error updating attendance', 'error');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="space-y-3">
-            <div className="h-4 bg-gray-200 rounded"></div>
-            <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-medium text-gray-900">Edit Attendance Records</h2>
-        <p className="text-sm text-gray-500">Modify attendance entries for past days</p>
-      </div>
-      <div className="p-6">
-        {attendanceRecords.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-gray-400 text-6xl mb-4">📊</div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Attendance Records</h3>
-            <p className="text-gray-500">No attendance has been marked for this class yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {attendanceRecords.map((record) => (
-              <div key={record._id} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-medium text-gray-900">
-                    {new Date(record.date).toLocaleDateString()}
-                  </h3>
-                  <span className="text-sm text-gray-500">
-                    {record.presentCount}/{record.totalStudents} students present
-                        </span>
-                </div>
-                <p className="text-sm text-gray-600">
-                  Absent: {record.absentees?.join(', ') || 'None'}
-                </p>
-                <button
-                  onClick={() => handleEditAttendance(record._id, { presentCount: record.presentCount + 1 })}
-                  className="mt-2 text-blue-600 hover:text-blue-800 text-sm"
-                >
-                  Edit Record
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -498,26 +650,138 @@ const EditAttendanceTab = ({ classData, students, onToast }) => {
 const AttendanceHistoryTab = ({ classData, students, onToast }) => {
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
-  });
+  const [viewMode, setViewMode] = useState('today'); // 'today' or 'specificDate'
+  const [specificDate, setSpecificDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     fetchAttendanceHistory();
-  }, [dateRange]);
+  }, [specificDate, viewMode]);
 
   const fetchAttendanceHistory = async () => {
     try {
       setLoading(true);
-      const response = await apiFetch({
-        url: `/api/attendance/history?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`,
-        method: 'GET'
-      });
+      const allRecords = [];
+      
+      if (viewMode === 'today') {
+        // Fetch only today's attendance
+        const todayString = new Date().toISOString().split('T')[0];
+        
+        try {
+          const response = await apiFetch({
+            url: `/api/attendance/history-by-class?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&date=${todayString}`,
+            method: 'GET'
+          });
 
-      if (response.data.success) {
-        setAttendanceHistory(response.data.data || []);
+          if (response.data.status === 'success' && response.data.data && response.data.data.records) {
+            const records = response.data.data.records;
+            if (records.length > 0) {
+              // Group records by date and calculate summary
+              const dateRecords = records.reduce((acc, record) => {
+                const recordDate = todayString; // Use the date we queried for
+                if (!acc[recordDate]) {
+                  acc[recordDate] = {
+                    date: recordDate,
+                    presentCount: 0,
+                    absentCount: 0,
+                    totalStudents: students.length,
+                    records: []
+                  };
+                }
+                
+                if (record.status === 'Present') {
+                  acc[recordDate].presentCount++;
+                } else if (record.status === 'Absent') {
+                  acc[recordDate].absentCount++;
+                }
+                
+                acc[recordDate].records.push(record);
+                return acc;
+              }, {});
+              
+              // Add summary records to allRecords
+              Object.values(dateRecords).forEach(summary => {
+                allRecords.push(summary);
+              });
+            }
+          }
+        } catch (dateError) {
+          console.error(`Error fetching attendance for today:`, dateError);
+        }
+      } else {
+        // Fetch attendance for specific date
+        try {
+          const response = await apiFetch({
+            url: `/api/attendance/history-by-class?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&date=${specificDate}`,
+            method: 'GET'
+          });
+
+          if (response.data.status === 'success' && response.data.data && response.data.data.records) {
+            const records = response.data.data.records;
+            if (records.length > 0) {
+              // Group records by date and calculate summary
+              const dateRecords = records.reduce((acc, record) => {
+                const recordDate = specificDate; // Use the specific date we queried for
+                if (!acc[recordDate]) {
+                  acc[recordDate] = {
+                    date: recordDate,
+                    presentCount: 0,
+                    absentCount: 0,
+                    totalStudents: students.length,
+                    records: []
+                  };
+                }
+                
+                if (record.status === 'Present') {
+                  acc[recordDate].presentCount++;
+                } else if (record.status === 'Absent') {
+                  acc[recordDate].absentCount++;
+                }
+                
+                acc[recordDate].records.push(record);
+                return acc;
+              }, {});
+              
+              // Add summary records to allRecords
+              Object.values(dateRecords).forEach(summary => {
+                allRecords.push(summary);
+              });
+            } else {
+              // Add empty record for dates with no attendance
+              allRecords.push({
+                date: specificDate,
+                presentCount: 0,
+                absentCount: 0,
+                totalStudents: students.length,
+                records: []
+              });
+            }
+          } else {
+            // Add empty record for dates with no attendance
+            allRecords.push({
+              date: specificDate,
+              presentCount: 0,
+              absentCount: 0,
+              totalStudents: students.length,
+              records: []
+            });
+          }
+        } catch (dateError) {
+          console.error(`Error fetching attendance for ${specificDate}:`, dateError);
+          // Add empty record for dates with errors
+          allRecords.push({
+            date: specificDate,
+            presentCount: 0,
+            absentCount: 0,
+            totalStudents: students.length,
+            records: []
+          });
+        }
       }
+      
+      // Sort records by date (newest first)
+      allRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setAttendanceHistory(allRecords);
+      
     } catch (error) {
       console.error('Error fetching attendance history:', error);
       onToast('Error loading attendance history', 'error');
@@ -547,25 +811,60 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
         <p className="text-sm text-gray-500">View detailed attendance records</p>
       </div>
       <div className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+        {/* View Mode Toggle */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-3">View Mode</label>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => setViewMode('today')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'today'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              📅 Today
+            </button>
+            <button
+              onClick={() => setViewMode('specificDate')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'specificDate'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              📅 Specific Date
+            </button>
+          </div>
+        </div>
+
+        {/* Specific Date Input - Only show when specificDate mode is selected */}
+        {viewMode === 'specificDate' && (
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
             <input
               type="date"
-              value={dateRange.startDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+              value={specificDate}
+              onChange={(e) => setSpecificDate(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-            <input
-              type="date"
-              value={dateRange.endDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        )}
+
+        <div className="flex justify-between items-center mb-4">
+          <div className="text-sm text-gray-600">
+            {viewMode === 'today' 
+              ? `Showing today's attendance (${new Date().toLocaleDateString()})`
+              : `Showing attendance for ${new Date(specificDate).toLocaleDateString()}`
+            }
           </div>
+          <button
+            onClick={fetchAttendanceHistory}
+            disabled={loading}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+          >
+            {loading ? 'Loading...' : '🔄 Refresh'}
+          </button>
         </div>
 
         {attendanceHistory.length === 0 ? (
@@ -586,8 +885,8 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {attendanceHistory.map((record) => (
-                  <tr key={record._id} className="hover:bg-gray-50">
+                {attendanceHistory.map((record, index) => (
+                  <tr key={record.date || index} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {new Date(record.date).toLocaleDateString()}
                     </td>
@@ -595,13 +894,13 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
                       {record.presentCount}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {record.totalStudents - record.presentCount}
+                      {record.absentCount}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {((record.presentCount / record.totalStudents) * 100).toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
+                      {record.totalStudents > 0 ? ((record.presentCount / record.totalStudents) * 100).toFixed(1) : 0}%
+                    </td>
+                  </tr>
+                ))}
                 </tbody>
               </table>
             </div>

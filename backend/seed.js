@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import User from './models/User.js';
+import Faculty from './models/Faculty.js';
 import Attendance from './models/Attendance.js';
 import config from './config/config.js';
 
@@ -120,6 +121,58 @@ const seedUsers = async () => {
     await faculty3.save();
     console.log('✅ Created FACULTY (EE): faculty.ee1@attendance.com / faculty123');
 
+    // 4.1. Create Faculty records for class advisor functionality
+    const facultyRecord1 = new Faculty({
+      name: 'Dr. Emily Davis',
+      userId: faculty1._id,
+      email: 'faculty.cs1@attendance.com',
+      position: 'Assistant Professor',
+      department: 'CSE',
+      is_class_advisor: true,
+      batch: '2023-2027',
+      year: '1st Year',
+      semester: 1,
+      section: 'A',
+      assignedClass: 'CS-101',
+      createdBy: hodCS._id
+    });
+    await facultyRecord1.save();
+    console.log('✅ Created FACULTY RECORD (CS): Dr. Emily Davis');
+
+    const facultyRecord2 = new Faculty({
+      name: 'Prof. James Wilson',
+      userId: faculty2._id,
+      email: 'faculty.cs2@attendance.com',
+      position: 'Associate Professor',
+      department: 'CSE',
+      is_class_advisor: true,
+      batch: '2023-2027',
+      year: '2nd Year',
+      semester: 3,
+      section: 'A',
+      assignedClass: 'CS-201',
+      createdBy: hodCS._id
+    });
+    await facultyRecord2.save();
+    console.log('✅ Created FACULTY RECORD (CS): Prof. James Wilson');
+
+    const facultyRecord3 = new Faculty({
+      name: 'Dr. Maria Rodriguez',
+      userId: faculty3._id,
+      email: 'faculty.ee1@attendance.com',
+      position: 'Assistant Professor',
+      department: 'EEE',
+      is_class_advisor: true,
+      batch: '2023-2027',
+      year: '1st Year',
+      semester: 1,
+      section: 'A',
+      assignedClass: 'EE-101',
+      createdBy: hodEE._id
+    });
+    await facultyRecord3.save();
+    console.log('✅ Created FACULTY RECORD (EEE): Dr. Maria Rodriguez');
+
     // 5. Create Students
     const students = [
       {
@@ -220,7 +273,8 @@ const seedUsers = async () => {
     console.log('   👨‍💻 1 Admin');
     console.log('   🎓 1 Principal');
     console.log('   🧑‍🏫 2 HODs (CS, EE)');
-    console.log('   👩‍🏫 3 Faculty (2 CS, 1 EE)');
+    console.log('   👩‍🏫 3 Faculty Users (2 CS, 1 EE)');
+    console.log('   👨‍🏫 3 Faculty Records (Class Advisors)');
     console.log('   🎒 5 Students (3 CS, 2 EE)');
     console.log('\n🔑 Login Credentials:');
     console.log('   Admin: admin@attendance.com / password123');

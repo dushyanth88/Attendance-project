@@ -43,7 +43,7 @@ const normalizeSemester = (semInput) => {
 };
 
 const makeClassKey = ({ batch, year, semester, section }) => {
-  return `${batch}|${year}|${semester}${section ? `|${section}` : ''}`;
+  return `${batch}_${year}_${semester}${section ? `_${section}` : ''}`;
 };
 
 // SSE clients mapped by student userId => Set of response streams
@@ -1184,12 +1184,13 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       const student = rollToStudent.get(roll);
       bulkOps.push({
         updateOne: {
-          filter: { studentId: student.userId, classId: classKey, date: requestDateString },
+          filter: { studentId: student.userId, classId: classKey, localDate: requestDateString },
           update: {
             $set: {
               status: 'Absent',
               facultyId: currentUser._id,
               date: requestDateString,
+              localDate: requestDateString,
               classId: classKey
             }
           },
@@ -1203,12 +1204,13 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       const student = rollToStudent.get(roll);
       bulkOps.push({
         updateOne: {
-          filter: { studentId: student.userId, classId: classKey, date: requestDateString },
+          filter: { studentId: student.userId, classId: classKey, localDate: requestDateString },
           update: {
             $set: {
               status: 'Present',
               facultyId: currentUser._id,
               date: requestDateString,
+              localDate: requestDateString,
               classId: classKey
             }
           },
@@ -1379,6 +1381,8 @@ router.put('/edit-students', authenticate, facultyAndAbove, [
 router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) => {
   try {
     const { batch, year, semester, section, date } = req.query;
+    console.log('🔍 History-by-class request:', { batch, year, semester, section, date });
+    
     if (!batch || !year || !semester || !date) {
       return res.status(400).json({ status: 'error', message: 'batch, year, semester and date are required' });
     }
@@ -1386,6 +1390,8 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
     const currentUser = req.user;
     const normalizedYear = normalizeYear(year);
     const normalizedSemester = normalizeSemester(semester);
+    
+    console.log('🔍 Normalized values:', { normalizedYear, normalizedSemester });
 
     // Authorization
     const faculty = await Faculty.findOne({
@@ -1398,14 +1404,12 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
       department: currentUser.department,
       status: 'active'
     });
+    
+    console.log('👨‍🏫 Faculty authorization check:', faculty ? '✅ Authorized' : '❌ Not authorized');
+    
     if (!faculty) {
       return res.status(403).json({ status: 'error', message: 'You are not authorized to view attendance for this class' });
     }
-
-    const queryDate = new Date(date);
-    queryDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(queryDate);
-    endDate.setHours(23, 59, 59, 999);
 
     const studentsInClass = await Student.find({
       batch,
@@ -1414,13 +1418,23 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
       department: currentUser.department,
       status: 'active'
     }).select('rollNumber name userId');
+    
+    console.log('👥 Students found:', studentsInClass.length);
 
     const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
+    console.log('🔑 Class key:', classKey);
+    
+    // Use localDate instead of date for filtering
     const attendanceRecords = await Attendance.find({
       studentId: { $in: studentsInClass.map(s => s.userId) },
       classId: classKey,
-      date: { $gte: queryDate, $lte: endDate }
+      localDate: date
     }).select('studentId status');
+    
+    console.log('📊 Attendance records found:', attendanceRecords.length);
+    attendanceRecords.forEach(r => {
+      console.log(`  - StudentId: ${r.studentId}, Status: ${r.status}`);
+    });
 
     const attendanceMap = new Map(attendanceRecords.map(att => [att.studentId.toString(), att.status]));
     const records = studentsInClass.map(student => ({
@@ -1428,6 +1442,8 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
       name: student.name,
       status: attendanceMap.get(student.userId.toString()) || 'Not Marked'
     }));
+    
+    console.log('📋 Final records:', records);
 
     res.status(200).json({ status: 'success', data: { records } });
   } catch (error) {

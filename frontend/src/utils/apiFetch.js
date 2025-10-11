@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-// Axios base is already set in AuthContext to http://localhost:5000
+// Set base URL for API calls
+const API_BASE_URL = 'http://localhost:5000';
 
 export const apiFetch = async (options) => {
   const {
@@ -17,24 +18,44 @@ export const apiFetch = async (options) => {
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
+  // Ensure full URL is used
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+
   try {
-    const res = await axios({ url, method, data, headers, responseType });
+    const res = await axios({ 
+      url: fullUrl, 
+      method, 
+      data, 
+      headers, 
+      responseType 
+    });
     return res;
   } catch (error) {
+    console.error('API Fetch Error:', error);
+    
     // If unauthorized, try refresh flow
     const status = error?.response?.status;
     if (status === 401 && localStorage.getItem('refreshToken')) {
       try {
-        const refreshRes = await axios.post('/api/auth/refresh', { refreshToken: localStorage.getItem('refreshToken') });
+        const refreshRes = await axios.post(`${API_BASE_URL}/api/auth/refresh`, { 
+          refreshToken: localStorage.getItem('refreshToken') 
+        });
         const newAccess = refreshRes.data?.accessToken;
         if (newAccess) {
           localStorage.setItem('accessToken', newAccess);
-          axios.defaults.headers.common['Authorization'] = `Bearer ${newAccess}`;
-          // retry
-          const retry = await axios({ url, method, data, headers, responseType });
+          headers.Authorization = `Bearer ${newAccess}`;
+          // retry with new token
+          const retry = await axios({ 
+            url: fullUrl, 
+            method, 
+            data, 
+            headers, 
+            responseType 
+          });
           return retry;
         }
       } catch (e) {
+        console.error('Token refresh failed:', e);
         // fallthrough; let caller handle
       }
     }
