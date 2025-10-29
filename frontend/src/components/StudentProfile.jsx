@@ -231,10 +231,6 @@ const StudentProfile = () => {
                     {studentData.section && ` | Section ${studentData.section}`}
                   </p>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Class Teacher</label>
-                  <p className="text-gray-900">{studentData.facultyName}</p>
-                </div>
               </div>
             </div>
 

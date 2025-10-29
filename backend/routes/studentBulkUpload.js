@@ -304,7 +304,7 @@ router.post('/bulk-upload', authenticate, facultyAndAbove, upload.single('file')
       classId,
       batch,
       year: normalizedYear,
-      semester: normalizedSemester,
+      semester: parseInt(semester), // Pass numeric semester for assignedClasses matching
       section: section || 'A',
       department: currentUser.department // Use user's department, not request body
     });
@@ -321,7 +321,7 @@ router.post('/bulk-upload', authenticate, facultyAndAbove, upload.single('file')
     const classMetadata = {
       batch,
       year: normalizedYear,
-      semester: normalizedSemester,
+      semester: parseInt(semester), // Use numeric semester for assignedClasses matching
       section: section || 'A',
       department: currentUser.department // Use user's department for consistency
     };
@@ -412,7 +412,7 @@ router.post('/bulk-upload', authenticate, facultyAndAbove, upload.single('file')
       classContext: {
         batch,
         year: normalizedYear,
-        semester: normalizedSemester,
+        semester: parseInt(semester), // Use numeric semester for consistency
         section: section || 'A',
         department: currentUser.department
       }

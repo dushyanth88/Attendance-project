@@ -65,6 +65,15 @@ const classAssignmentSchema = new mongoose.Schema({
   deactivatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  // Attendance date range
+  attendanceStartDate: {
+    type: Date,
+    default: null
+  },
+  attendanceEndDate: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

@@ -1,17 +1,116 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import CreateUserModal from '../../components/CreateUserModal';
 import FacultyList from '../../components/FacultyList';
+import { apiFetch } from '../../utils/apiFetch';
 
 const HODDashboard = () => {
   const { user, logout } = useAuth();
   const [showCreateFacultyModal, setShowCreateFacultyModal] = useState(false);
   const [facultyRefreshTrigger, setFacultyRefreshTrigger] = useState(0);
+  const [departmentStats, setDepartmentStats] = useState({
+    totalStudents: 0,
+    totalFaculty: 0,
+    loading: true
+  });
+  const [dailyAttendanceStats, setDailyAttendanceStats] = useState({
+    attendancePercentage: 0,
+    totalStudents: 0,
+    presentStudents: 0,
+    absentStudents: 0,
+    notMarkedStudents: 0,
+    date: '',
+    loading: true
+  });
 
   const handleFacultyCreated = () => {
     setFacultyRefreshTrigger(prev => prev + 1);
     setShowCreateFacultyModal(false);
+    // Refresh department stats when new faculty is created
+    fetchDepartmentStats();
+    fetchDailyAttendanceStats();
   };
+
+  const fetchDepartmentStats = async () => {
+    try {
+      setDepartmentStats(prev => ({ ...prev, loading: true }));
+      
+      const response = await apiFetch({
+        url: '/api/admin/department-stats',
+        method: 'GET'
+      });
+
+      if (response.data.success) {
+        const data = response.data.data;
+        console.log('📊 Department stats response:', data);
+        
+        // Use the final counts from backend (which already handles fallbacks)
+        setDepartmentStats({
+          totalStudents: data.totalStudents,
+          totalFaculty: data.totalFaculty,
+          loading: false
+        });
+        
+        console.log('📊 Department stats loaded:', {
+          students: data.totalStudents,
+          faculty: data.totalFaculty,
+          debug: data.debug
+        });
+      } else {
+        throw new Error(response.data.msg || 'Failed to fetch department statistics');
+      }
+    } catch (error) {
+      console.error('Error fetching department statistics:', error);
+      setDepartmentStats(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const fetchDailyAttendanceStats = async () => {
+    try {
+      setDailyAttendanceStats(prev => ({ ...prev, loading: true }));
+      
+      const response = await apiFetch({
+        url: '/api/admin/daily-attendance',
+        method: 'GET'
+      });
+
+      if (response.data.success) {
+        const data = response.data.data;
+        console.log('📊 Daily attendance stats response:', data);
+        
+        setDailyAttendanceStats({
+          attendancePercentage: data.attendancePercentage,
+          totalStudents: data.totalStudents,
+          presentStudents: data.presentStudents,
+          absentStudents: data.absentStudents,
+          notMarkedStudents: data.notMarkedStudents,
+          date: data.date,
+          loading: false
+        });
+        
+        console.log('📊 Daily attendance stats loaded:', {
+          percentage: data.attendancePercentage,
+          students: data.totalStudents,
+          presentStudents: data.presentStudents,
+          absentStudents: data.absentStudents,
+          notMarkedStudents: data.notMarkedStudents,
+          date: data.date
+        });
+      } else {
+        throw new Error(response.data.msg || 'Failed to fetch daily attendance statistics');
+      }
+    } catch (error) {
+      console.error('Error fetching daily attendance statistics:', error);
+      setDailyAttendanceStats(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (user?.department) {
+      fetchDepartmentStats();
+      fetchDailyAttendanceStats();
+    }
+  }, [user?.department]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -40,13 +139,19 @@ const HODDashboard = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center">
               <span className="text-3xl mr-3">👥</span>
               <div>
                 <p className="text-sm text-gray-600">Department Students</p>
-                <p className="text-2xl font-bold text-gray-900">324</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {departmentStats.loading ? (
+                    <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                  ) : (
+                    departmentStats.totalStudents.toLocaleString()
+                  )}
+                </p>
               </div>
             </div>
           </div>
@@ -55,16 +160,13 @@ const HODDashboard = () => {
               <span className="text-3xl mr-3">👨‍🏫</span>
               <div>
                 <p className="text-sm text-gray-600">Faculty Members</p>
-                <p className="text-2xl font-bold text-gray-900">18</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center">
-              <span className="text-3xl mr-3">📚</span>
-              <div>
-                <p className="text-sm text-gray-600">Active Courses</p>
-                <p className="text-2xl font-bold text-gray-900">24</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {departmentStats.loading ? (
+                    <div className="animate-pulse bg-gray-200 h-8 w-12 rounded"></div>
+                  ) : (
+                    departmentStats.totalFaculty.toLocaleString()
+                  )}
+                </p>
               </div>
             </div>
           </div>
@@ -72,8 +174,19 @@ const HODDashboard = () => {
             <div className="flex items-center">
               <span className="text-3xl mr-3">📊</span>
               <div>
-                <p className="text-sm text-gray-600">Dept. Attendance</p>
-                <p className="text-2xl font-bold text-green-600">89.2%</p>
+                <p className="text-sm text-gray-600">Today's Attendance</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {dailyAttendanceStats.loading ? (
+                    <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                  ) : (
+                    `${dailyAttendanceStats.attendancePercentage}%`
+                  )}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {dailyAttendanceStats.loading ? '' : 
+                    `${dailyAttendanceStats.presentStudents}/${dailyAttendanceStats.totalStudents} present`
+                  }
+                </p>
               </div>
             </div>
           </div>

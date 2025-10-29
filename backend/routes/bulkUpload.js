@@ -256,7 +256,7 @@ router.post('/students', authenticate, facultyAndAbove, upload.single('file'), [
       classContext: {
         batch,
         year,
-        semester: `Sem ${semester}`,
+        semester: parseInt(semester), // Use numeric semester for consistency
         section: section || 'A',
         department
       }

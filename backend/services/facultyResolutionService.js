@@ -33,43 +33,105 @@ export async function resolveFacultyId(options) {
 
   // Strategy 1: Logged-in user session (highest priority)
   if (user && user.role === 'faculty') {
+    // Check if faculty is assigned to this specific class
     const faculty = await Faculty.findOne({
       userId: user._id,
-      is_class_advisor: true,
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': year,
+      'assignedClasses.semester': semester,
+      'assignedClasses.section': section || 'A',
+      'assignedClasses.active': true,
       status: 'active'
     });
 
     if (faculty) {
-      console.log('✅ Faculty resolved from user session:', faculty._id);
+      console.log('✅ Faculty resolved from user session with class assignment:', faculty._id);
       return {
         facultyId: faculty._id,
         faculty,
         source: 'user_session'
       };
     }
-  }
 
-  // Strategy 2: Class mapping lookup using classId
-  if (classId) {
-    const faculty = await Faculty.findOne({
-      classId: classId,
+    // Fallback: Check if faculty is a class advisor (legacy support)
+    const legacyFaculty = await Faculty.findOne({
+      userId: user._id,
       is_class_advisor: true,
       status: 'active'
     });
 
+    if (legacyFaculty) {
+      console.log('✅ Faculty resolved from user session (legacy):', legacyFaculty._id);
+      return {
+        facultyId: legacyFaculty._id,
+        faculty: legacyFaculty,
+        source: 'user_session_legacy'
+      };
+    }
+  }
+
+  // Strategy 2: Class mapping lookup using classId
+  if (classId) {
+    // First try to find faculty assigned to this specific class
+    const faculty = await Faculty.findOne({
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': year,
+      'assignedClasses.semester': semester,
+      'assignedClasses.section': section || 'A',
+      'assignedClasses.active': true,
+      status: 'active'
+    });
+
     if (faculty) {
-      console.log('✅ Faculty resolved from classId mapping:', faculty._id);
+      console.log('✅ Faculty resolved from classId mapping (assignedClasses):', faculty._id);
       return {
         facultyId: faculty._id,
         faculty,
         source: 'class_mapping'
       };
     }
+
+    // Fallback: Legacy classId lookup
+    const legacyFaculty = await Faculty.findOne({
+      classId: classId,
+      is_class_advisor: true,
+      status: 'active'
+    });
+
+    if (legacyFaculty) {
+      console.log('✅ Faculty resolved from classId mapping (legacy):', legacyFaculty._id);
+      return {
+        facultyId: legacyFaculty._id,
+        faculty: legacyFaculty,
+        source: 'class_mapping_legacy'
+      };
+    }
   }
 
   // Strategy 3: Batch/Year/Semester lookup
   if (batch && year && semester) {
+    // First try to find faculty assigned to this specific class
     const faculty = await Faculty.findOne({
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': year,
+      'assignedClasses.semester': parseInt(String(semester), 10) || parseInt(String(semester).match(/\d+/)?.[0] || '0', 10),
+      'assignedClasses.section': section || 'A',
+      'assignedClasses.active': true,
+      department,
+      status: 'active'
+    });
+
+    if (faculty) {
+      console.log('✅ Faculty resolved from batch/year/semester lookup (assignedClasses):', faculty._id);
+      return {
+        facultyId: faculty._id,
+        faculty,
+        source: 'batch_lookup'
+      };
+    }
+
+    // Fallback: Legacy batch/year/semester lookup
+    const legacyFaculty = await Faculty.findOne({
       batch,
       year,
       semester: parseInt(String(semester), 10) || parseInt(String(semester).match(/\d+/)?.[0] || '0', 10),
@@ -79,12 +141,12 @@ export async function resolveFacultyId(options) {
       status: 'active'
     });
 
-    if (faculty) {
-      console.log('✅ Faculty resolved from batch/year/semester lookup:', faculty._id);
+    if (legacyFaculty) {
+      console.log('✅ Faculty resolved from batch/year/semester lookup (legacy):', legacyFaculty._id);
       return {
-        facultyId: faculty._id,
-        faculty,
-        source: 'batch_lookup'
+        facultyId: legacyFaculty._id,
+        faculty: legacyFaculty,
+        source: 'batch_lookup_legacy'
       };
     }
   }
@@ -120,95 +182,48 @@ export async function resolveFacultyId(options) {
  */
 export async function validateFacultyClassBinding(facultyId, classId, classMetadata = {}) {
   try {
-    const faculty = await Faculty.findOne({
-      _id: facultyId,
-      is_class_advisor: true,
-      status: 'active'
-    });
+    const faculty = await Faculty.findById(facultyId);
 
-    if (!faculty) {
-      console.error('❌ Faculty not found or not authorized:', facultyId);
+    if (!faculty || faculty.status !== 'active') {
+      console.error('❌ Faculty not found or not active:', facultyId);
       return false;
     }
 
-    // Check if faculty matches class metadata
+    // Check if faculty matches class metadata through assignedClasses
     const { batch, year, semester, section, department } = classMetadata;
     
-    if (batch && faculty.batch !== batch) {
-      console.error('❌ Faculty batch mismatch:', faculty.batch, 'vs', batch);
-      return false;
+    // First check if faculty is assigned to this specific class
+    const assignedClass = faculty.assignedClasses?.find(cls => 
+      cls.batch === batch && 
+      cls.year === year && 
+      cls.semester === semester && 
+      cls.section === (section || 'A') && 
+      cls.active
+    );
+
+    if (assignedClass) {
+      console.log('✅ Faculty class binding validated through assignedClasses:', facultyId);
+      return true;
     }
 
-    if (year && faculty.year !== year) {
-      // Try to normalize year formats for comparison
-      const normalizeYearForComparison = (yr) => {
-        if (typeof yr === 'string') {
-          // Handle variations like "1st Year", "1st", "1"
-          const normalized = yr.toLowerCase().trim();
-          if (normalized.includes('1st') || normalized === '1') return '1st Year';
-          if (normalized.includes('2nd') || normalized === '2') return '2nd Year';
-          if (normalized.includes('3rd') || normalized === '3') return '3rd Year';
-          if (normalized.includes('4th') || normalized === '4') return '4th Year';
-          return yr;
-        }
-        return yr;
-      };
-      
-      const normalizedFacultyYear = normalizeYearForComparison(faculty.year);
-      const normalizedInputYear = normalizeYearForComparison(year);
-      
-      console.log('🔍 Year normalization:', {
-        facultyOriginal: faculty.year,
-        facultyNormalized: normalizedFacultyYear,
-        inputOriginal: year,
-        inputNormalized: normalizedInputYear
-      });
-      
-      if (normalizedFacultyYear !== normalizedInputYear) {
-        console.error('❌ Faculty year mismatch after normalization:', normalizedFacultyYear, 'vs', normalizedInputYear);
-        return false;
+    // Fallback: Check legacy fields for backward compatibility
+    if (faculty.is_class_advisor && faculty.batch === batch && faculty.year === year && faculty.semester === semester) {
+      console.log('✅ Faculty class binding validated through legacy fields:', facultyId);
+      return true;
+    }
+
+    console.error('❌ Faculty not assigned to this class:', {
+      facultyId,
+      classMetadata,
+      assignedClasses: faculty.assignedClasses?.length || 0,
+      legacyFields: {
+        is_class_advisor: faculty.is_class_advisor,
+        batch: faculty.batch,
+        year: faculty.year,
+        semester: faculty.semester
       }
-    }
-
-    if (semester && faculty.semester !== semester) {
-      // Try to normalize semester formats for comparison
-      const normalizeSemesterForComparison = (sem) => {
-        if (typeof sem === 'number') return sem;
-        if (typeof sem === 'string') {
-          const match = sem.match(/\d+/);
-          return match ? parseInt(match[0], 10) : sem;
-        }
-        return sem;
-      };
-      
-      const normalizedFacultySemester = normalizeSemesterForComparison(faculty.semester);
-      const normalizedInputSemester = normalizeSemesterForComparison(semester);
-      
-      console.log('🔍 Semester normalization:', {
-        facultyOriginal: faculty.semester,
-        facultyNormalized: normalizedFacultySemester,
-        inputOriginal: semester,
-        inputNormalized: normalizedInputSemester
-      });
-      
-      if (normalizedFacultySemester !== normalizedInputSemester) {
-        console.error('❌ Faculty semester mismatch after normalization:', normalizedFacultySemester, 'vs', normalizedInputSemester);
-        return false;
-      }
-    }
-
-    if (section && faculty.section !== section) {
-      console.error('❌ Faculty section mismatch:', faculty.section, 'vs', section);
-      return false;
-    }
-
-    if (department && faculty.department !== department) {
-      console.error('❌ Faculty department mismatch:', faculty.department, 'vs', department);
-      return false;
-    }
-
-    console.log('✅ Faculty-class binding validated successfully');
-    return true;
+    });
+    return false;
 
   } catch (error) {
     console.error('❌ Error validating faculty-class binding:', error);

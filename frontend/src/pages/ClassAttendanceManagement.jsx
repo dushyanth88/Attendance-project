@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../utils/apiFetch';
 import Toast from '../components/Toast';
 import BulkUploadModal from '../components/BulkUploadModal';
+import HolidayModal from '../components/HolidayModal';
+import HolidayManagement from '../components/HolidayManagement';
 
 const ClassAttendanceManagement = () => {
   const { classId } = useParams();
@@ -14,6 +16,12 @@ const ClassAttendanceManagement = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('mark');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [attendanceStartDate, setAttendanceStartDate] = useState('');
+  const [attendanceEndDate, setAttendanceEndDate] = useState('');
+  const [updatingDates, setUpdatingDates] = useState(false);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [showHolidayManagement, setShowHolidayManagement] = useState(false);
+  const [selectedHolidayDate, setSelectedHolidayDate] = useState('');
 
   useEffect(() => {
     if (classId) {
@@ -21,53 +29,169 @@ const ClassAttendanceManagement = () => {
     }
   }, [classId]);
 
+  useEffect(() => {
+    if (classData) {
+      // Set attendance date states when classData is loaded
+      if (classData.attendanceStartDate) {
+        const startDate = new Date(classData.attendanceStartDate);
+        setAttendanceStartDate(startDate.toISOString().split('T')[0]);
+      }
+      if (classData.attendanceEndDate) {
+        const endDate = new Date(classData.attendanceEndDate);
+        setAttendanceEndDate(endDate.toISOString().split('T')[0]);
+      }
+    }
+  }, [classData]);
+
   const fetchClassData = async () => {
     try {
       setLoading(true);
       
       console.log('🔍 Fetching class data for classId:', classId);
+      console.log('👤 Current user:', user);
       
-      // Fetch class assignment details using the ClassAssignment model
-      const classResponse = await apiFetch({
-        url: `/api/class-assignment/${classId}`,
-        method: 'GET'
-      });
-
-      console.log('📋 Class assignment response:', classResponse.data);
-
-      if (classResponse.data.status === 'success') {
-        const assignment = classResponse.data.data;
-        const newClassData = {
-          batch: assignment.batch,
-          year: assignment.year,
-          semester: assignment.semester,
-          section: assignment.section,
-          department: user.department // Use user's department instead of departmentId
-        };
-        
-        setClassData(newClassData);
-        
-        console.log('✅ Class data set:', newClassData);
-        
-        // Fetch students for this class using the faculty students endpoint
-        const studentsResponse = await apiFetch({
-          url: `/api/faculty/students?batch=${encodeURIComponent(assignment.batch)}&year=${encodeURIComponent(assignment.year)}&semester=${assignment.semester}&department=${encodeURIComponent(user.department)}`,
+      // Try to fetch class assignment details first using the MongoDB ObjectId
+      let assignment = null;
+      try {
+        const classResponse = await apiFetch({
+          url: `/api/class-assignment/${classId}`,
           method: 'GET'
         });
 
-        console.log('👥 Students response:', studentsResponse.data);
+        console.log('📋 Class assignment response:', classResponse.data);
 
-        if (studentsResponse.data.success) {
-          setStudents(studentsResponse.data.data.students || []);
-          console.log('✅ Students loaded:', studentsResponse.data.data.students?.length || 0);
+        if (classResponse.data.status === 'success') {
+          assignment = classResponse.data.data;
+          console.log('🔍 Assignment data:', assignment);
+          console.log('👨‍🏫 Faculty ID:', assignment.facultyId);
         }
-      } else {
-        console.error('❌ Failed to fetch class assignment:', classResponse.data.message);
-        setToast({ show: true, message: classResponse.data.message || 'Failed to load class data', type: 'error' });
+      } catch (assignmentError) {
+        console.log('⚠️ No formal class assignment found, using fallback approach');
+        console.log('Assignment error:', assignmentError);
       }
+      
+      // Create class data with or without formal assignment
+      const newClassData = {
+        batch: assignment?.batch || 'Unknown',
+        year: assignment?.year || 'Unknown',
+        semester: assignment?.semester || 1,
+        section: assignment?.section || 'A',
+        department: user.department,
+        facultyId: assignment?.facultyId || null, // Include faculty information if available
+        assignedBy: assignment?.assignedBy || null,
+        attendanceStartDate: assignment?.attendanceStartDate || null,
+        attendanceEndDate: assignment?.attendanceEndDate || null
+      };
+      
+      setClassData(newClassData);
+      
+      console.log('✅ Class data set:', newClassData);
+      
+      // Fetch students for this class using the faculty students endpoint
+      const studentsResponse = await apiFetch({
+        url: `/api/faculty/students?batch=${encodeURIComponent(newClassData.batch)}&year=${encodeURIComponent(newClassData.year)}&semester=${newClassData.semester}&section=${encodeURIComponent(newClassData.section)}&department=${encodeURIComponent(user.department)}`,
+        method: 'GET'
+      });
+
+      console.log('👥 Students response:', studentsResponse.data);
+
+      if (studentsResponse.data.success) {
+        setStudents(studentsResponse.data.data.students || []);
+        console.log('✅ Students loaded:', studentsResponse.data.data.students?.length || 0);
+      }
+      
     } catch (error) {
       console.error('Error fetching class data:', error);
       setToast({ show: true, message: 'Error loading class data', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStudents = async () => {
+    try {
+      const studentsResponse = await apiFetch({
+        url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&section=${encodeURIComponent(classData.section)}&department=${encodeURIComponent(user.department)}`,
+        method: 'GET'
+      });
+
+      if (studentsResponse.data.success) {
+        setStudents(studentsResponse.data.data.students || []);
+        console.log('✅ Students refreshed:', studentsResponse.data.data.students?.length || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching students:', error);
+    }
+  };
+
+  const handleStudentProfilePictureUpload = async (event, studentId) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      showToast('Please select a valid image file (JPEG, PNG, GIF, WebP)', 'error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) { // 2MB limit
+      showToast('Image size must be less than 2MB', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const formData = new FormData();
+      formData.append('profilePicture', file);
+
+      const response = await apiFetch({
+        url: `/api/faculty/student-profile-picture/${studentId}`,
+        method: 'POST',
+        data: formData
+      });
+
+      if (response.data.success) {
+        showToast(`Profile picture uploaded successfully for ${response.data.data.studentName}!`, 'success');
+        // Refresh students list to show updated profile picture
+        fetchStudents();
+      } else {
+        showToast(response.data.msg || 'Failed to upload profile picture', 'error');
+      }
+    } catch (error) {
+      console.error('Error uploading student profile picture:', error);
+      if (error.response?.status === 403) {
+        showToast('Access denied. You are not the class advisor for this student.', 'error');
+      } else {
+        showToast('Failed to upload profile picture', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveStudentProfilePicture = async (studentId) => {
+    if (!window.confirm('Are you sure you want to remove this student\'s profile picture?')) return;
+
+    try {
+      setLoading(true);
+      const response = await apiFetch({
+        url: `/api/faculty/student-profile-picture/${studentId}`,
+        method: 'DELETE'
+      });
+
+      if (response.data.success) {
+        showToast(`Profile picture removed successfully for ${response.data.data.studentName}!`, 'success');
+        // Refresh students list to show updated profile picture
+        fetchStudents();
+      } else {
+        showToast(response.data.msg || 'Failed to remove profile picture', 'error');
+      }
+    } catch (error) {
+      console.error('Error removing student profile picture:', error);
+      if (error.response?.status === 403) {
+        showToast('Access denied. You are not the class advisor for this student.', 'error');
+      } else {
+        showToast('Failed to remove profile picture', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -82,11 +206,97 @@ const ClassAttendanceManagement = () => {
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
+  const testAttendanceDatesEndpoint = async () => {
+    try {
+      console.log('🧪 Testing attendance dates endpoint...');
+      
+      const response = await apiFetch({
+        url: `/api/class-assignment/${classId}/attendance-dates/test`,
+        method: 'GET'
+      });
+      
+      console.log('✅ Test endpoint response:', response);
+      showToast('Test endpoint working!', 'success');
+    } catch (error) {
+      console.error('❌ Test endpoint error:', error);
+      showToast('Test endpoint failed: ' + error.message, 'error');
+    }
+  };
+
+  const handleMarkHoliday = (date) => {
+    setSelectedHolidayDate(date);
+    setShowHolidayModal(true);
+  };
+
+  const handleHolidaySuccess = () => {
+    setShowHolidayModal(false);
+    setSelectedHolidayDate('');
+    showToast('Holiday marked successfully!', 'success');
+  };
+
+  const updateAttendanceDates = async () => {
+    try {
+      setUpdatingDates(true);
+      
+      console.log('🔄 Updating attendance dates:', {
+        classId,
+        attendanceStartDate,
+        attendanceEndDate
+      });
+      
+      // Validate classId
+      if (!classId) {
+        showToast('Class ID is missing. Please refresh the page and try again.', 'error');
+        return;
+      }
+      
+      const response = await apiFetch({
+        url: `/api/class-assignment/${classId}/attendance-dates`,
+        method: 'PUT',
+        data: {
+          attendanceStartDate: attendanceStartDate && attendanceStartDate.trim() !== '' ? attendanceStartDate : null,
+          attendanceEndDate: attendanceEndDate && attendanceEndDate.trim() !== '' ? attendanceEndDate : null
+        }
+      });
+
+      console.log('✅ Attendance dates response:', response);
+
+      if (response.data.status === 'success') {
+        showToast('Attendance dates updated successfully!', 'success');
+        // Refresh class data to get updated dates
+        await fetchClassData();
+      } else {
+        showToast(response.data.message || 'Failed to update attendance dates', 'error');
+      }
+    } catch (error) {
+      console.error('❌ Error updating attendance dates:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      
+      let errorMessage = 'Error updating attendance dates';
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      showToast(errorMessage, 'error');
+    } finally {
+      setUpdatingDates(false);
+    }
+  };
+
   const tabs = [
     { id: 'mark', label: 'Mark Attendance', icon: '📝' },
     { id: 'history', label: 'Attendance History', icon: '📊' },
     { id: 'report', label: 'Generate Report', icon: '📈' },
-    { id: 'students', label: 'Student Management', icon: '👥' }
+    { id: 'students', label: 'Student Management', icon: '👥' },
+    { id: 'dates', label: 'Attendance Dates', icon: '📅' },
+    { id: 'holidays', label: 'Holiday Management', icon: '🎉' }
   ];
 
   if (loading) {
@@ -157,6 +367,15 @@ const ClassAttendanceManagement = () => {
                 <p className="text-sm text-gray-500">
                   Manage attendance, students, and generate reports for this class
                 </p>
+                {classData.facultyId ? (
+                  <p className="text-sm text-blue-600 font-medium mt-1">
+                    Class Teacher: {classData.facultyId.name || classData.facultyId}
+                  </p>
+                ) : (
+                  <p className="text-sm text-blue-600 font-medium mt-1">
+                    Class Teacher: {user.name} (Current User)
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -216,9 +435,53 @@ const ClassAttendanceManagement = () => {
             onToast={showToast}
             onStudentsUpdate={setStudents}
             user={user}
+            onStudentProfilePictureUpload={handleStudentProfilePictureUpload}
+            onRemoveStudentProfilePicture={handleRemoveStudentProfilePicture}
+            navigate={navigate}
+          />
+        )}
+        {activeTab === 'dates' && (
+          <AttendanceDatesTab 
+            classData={classData}
+            attendanceStartDate={attendanceStartDate}
+            attendanceEndDate={attendanceEndDate}
+            setAttendanceStartDate={setAttendanceStartDate}
+            setAttendanceEndDate={setAttendanceEndDate}
+            updateAttendanceDates={updateAttendanceDates}
+            testAttendanceDatesEndpoint={testAttendanceDatesEndpoint}
+            updatingDates={updatingDates}
+            onToast={showToast}
+          />
+        )}
+        {activeTab === 'holidays' && (
+          <HolidayManagementTab 
+            onMarkHoliday={handleMarkHoliday}
+            onShowHolidayManagement={() => setShowHolidayManagement(true)}
           />
         )}
       </div>
+
+      {/* Holiday Modals */}
+      <HolidayModal
+        isOpen={showHolidayModal}
+        onClose={() => setShowHolidayModal(false)}
+        onSuccess={handleHolidaySuccess}
+        selectedDate={selectedHolidayDate}
+      />
+      
+      <HolidayManagement
+        isOpen={showHolidayManagement}
+        onClose={() => setShowHolidayManagement(false)}
+      />
+
+      {/* Toast */}
+      {toast.show && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ show: false, message: '', type: 'success' })}
+        />
+      )}
     </div>
   );
 };
@@ -914,117 +1177,328 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
 const AttendanceReportTab = ({ classData, students, onToast }) => {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
-  });
 
-  const generateReport = async () => {
+  const generateAbsenteesReport = async () => {
     try {
       setLoading(true);
+      const todayISO = new Date().toISOString().split('T')[0];
+      
+      console.log('🔍 Generating absentees report with params:', {
+        batch: classData.batch,
+        year: classData.year,
+        semester: classData.semester,
+        section: classData.section,
+        startDate: todayISO,
+        endDate: todayISO
+      });
+      
       const response = await apiFetch({
-        url: `/api/attendance/report?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`,
+        url: `/api/report/absentees?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&startDate=${todayISO}&endDate=${todayISO}`,
         method: 'GET'
       });
 
+      console.log('📊 API Response:', response.data);
+
       if (response.data.success) {
         setReportData(response.data.data);
+        onToast('Today\'s absentees report generated successfully!', 'success');
       } else {
-        onToast(response.data.message || 'Failed to generate report', 'error');
+        console.error('❌ API returned error:', response.data);
+        onToast(response.data.message || 'Failed to generate absentees report', 'error');
       }
     } catch (error) {
-      console.error('Error generating report:', error);
-      onToast('Error generating report', 'error');
+      console.error('❌ Error generating absentees report:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
+      });
+      
+      // Check for specific error types
+      if (error.response?.status === 401) {
+        onToast('Authentication failed. Please log in again.', 'error');
+      } else if (error.response?.status === 403) {
+        onToast('Access denied. You do not have permission to generate reports.', 'error');
+      } else if (error.response?.data?.message) {
+        onToast(`Error: ${error.response.data.message}`, 'error');
+      } else {
+        onToast('Error generating absentees report', 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const downloadReport = () => {
+  const downloadExcelReport = () => {
     if (!reportData) return;
     
-    const csvContent = [
-      ['Date', 'Present', 'Absent', 'Percentage'],
-      ...reportData.records.map(record => [
-        new Date(record.date).toLocaleDateString(),
-        record.presentCount,
-        record.totalStudents - record.presentCount,
-        ((record.presentCount / record.totalStudents) * 100).toFixed(1) + '%'
-      ])
-    ].map(row => row.join(',')).join('\n');
+    // Import XLSX dynamically
+    import('xlsx').then((XLSX) => {
+      const todayISO = new Date().toISOString().split('T')[0];
+      const worksheetData = [
+        ['S.No', 'Roll Number', 'Name', 'Total Days Absent', 'Reason', 'Action Taken', 'Attendance %'],
+        ...reportData.absentees.map(student => [
+          student.sNo,
+          student.rollNumber,
+          student.name,
+          student.totalDaysAbsent,
+          student.reason,
+          student.actionTaken,
+          `${student.attendancePercentage.toFixed(1)}%`
+        ])
+      ];
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `attendance-report-${classData.batch}-${dateRange.startDate}-to-${dateRange.endDate}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Absentees Report');
+
+      // Generate Excel file
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `absentees-report-${classData.batch}-${todayISO}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      onToast('Excel report downloaded successfully!', 'success');
+    }).catch(error => {
+      console.error('Error downloading Excel report:', error);
+      onToast('Error downloading Excel report', 'error');
+    });
+  };
+
+  const downloadPDFReport = () => {
+    if (!reportData) return;
+    
+    // Create a simple PDF using browser's print functionality
+    const printWindow = window.open('', '_blank');
+    const todayISO = new Date().toISOString().split('T')[0];
+    const reportContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Today's Absentees Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; margin-bottom: 30px; }
+          .class-info { margin-bottom: 20px; }
+          .summary { margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          .no-data { text-align: center; color: #666; margin: 40px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Today's Absentees Report</h1>
+          <h2>${reportData.classInfo.batch} | ${reportData.classInfo.year} | Semester ${reportData.classInfo.semester} | Section ${reportData.classInfo.section}</h2>
+          <p><strong>Date:</strong> ${new Date(todayISO).toLocaleDateString()}</p>
+        </div>
+        
+        <div class="class-info">
+          <p><strong>Department:</strong> ${reportData.classInfo.department}</p>
+        </div>
+        
+        <div class="summary">
+          <p><strong>Total Students:</strong> ${reportData.reportInfo.totalStudents}</p>
+          <p><strong>Total Absentees:</strong> ${reportData.reportInfo.totalAbsentees}</p>
+        </div>
+        
+        ${reportData.absentees.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th>
+                <th>Roll Number</th>
+                <th>Name</th>
+                <th>Total Days Absent</th>
+                <th>Reason</th>
+                <th>Action Taken</th>
+                <th>Attendance %</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${reportData.absentees.map(student => `
+                <tr>
+                  <td>${student.sNo}</td>
+                  <td>${student.rollNumber}</td>
+                  <td>${student.name}</td>
+                  <td>${student.totalDaysAbsent}</td>
+                  <td>${student.reason}</td>
+                  <td>${student.actionTaken}</td>
+                  <td>${student.attendancePercentage.toFixed(1)}%</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : `
+          <div class="no-data">
+            <h3>No Absentees Found</h3>
+            <p>All students have perfect attendance for today.</p>
+          </div>
+        `}
+      </body>
+      </html>
+    `;
+    
+    printWindow.document.write(reportContent);
+    printWindow.document.close();
+    printWindow.focus();
+    
+    // Wait for content to load then print
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 500);
+    
+    onToast('PDF report opened for printing!', 'success');
   };
 
   return (
     <div className="bg-white rounded-lg shadow">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-medium text-gray-900">Generate Attendance Report</h2>
-        <p className="text-sm text-gray-500">Create and download attendance summary reports</p>
+        <h2 className="text-lg font-medium text-gray-900">Generate Today's Absentees Report</h2>
+        <p className="text-sm text-gray-500">Create and download today's absentees report with roll number, name, total days absent, reason, and action taken</p>
       </div>
       <div className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-            <input
-              type="date"
-              value={dateRange.startDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-            <input
-              type="date"
-              value={dateRange.endDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        {/* Today's Date Display */}
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-blue-800">
+                Report Date
+              </h3>
+              <div className="mt-1 text-sm text-blue-700">
+                <p>{new Date().toLocaleDateString('en-GB', { 
+                  day: '2-digit', 
+                  month: '2-digit', 
+                  year: 'numeric' 
+                })} - Today's absentees will be included in the report</p>
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="flex justify-end mb-6">
           <button
-            onClick={generateReport}
+            onClick={generateAbsenteesReport}
             disabled={loading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
-            {loading ? 'Generating...' : 'Generate Report'}
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Generating...
+              </>
+            ) : (
+              <>
+                📈 Generate Today's Report
+              </>
+            )}
           </button>
         </div>
 
         {reportData && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Report Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-blue-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-blue-900">Total Days</h3>
-                <p className="text-2xl font-bold text-blue-600">{reportData.totalDays}</p>
+                <h3 className="text-sm font-medium text-blue-900">Total Students</h3>
+                <p className="text-2xl font-bold text-blue-600">{reportData.reportInfo.totalStudents}</p>
               </div>
-              <div className="bg-green-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-green-900">Average Attendance</h3>
-                <p className="text-2xl font-bold text-green-600">{reportData.averageAttendance.toFixed(1)}%</p>
-              </div>
-              <div className="bg-yellow-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-yellow-900">Total Students</h3>
-                <p className="text-2xl font-bold text-yellow-600">{reportData.totalStudents}</p>
+              <div className="bg-red-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-red-900">Today's Absentees</h3>
+                <p className="text-2xl font-bold text-red-600">{reportData.reportInfo.totalAbsentees}</p>
               </div>
             </div>
 
-            <div className="flex justify-end">
-              <button
-                onClick={downloadReport}
-                className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700"
-              >
-                Download CSV Report
-              </button>
-            </div>
+            {/* Absentees Table */}
+            {reportData.absentees.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">S.No</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Roll Number</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Days Absent</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action Taken</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {reportData.absentees.map((student) => (
+                      <tr key={student.rollNumber} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {student.sNo}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {student.rollNumber}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {student.name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            {student.totalDaysAbsent} days
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
+                          <div className="truncate" title={student.reason}>
+                            {student.reason}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
+                          <div className="truncate" title={student.actionTaken}>
+                            {student.actionTaken}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="text-gray-400 text-6xl mb-4">✅</div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Absentees Found</h3>
+                <p className="text-gray-500">All students have perfect attendance for today.</p>
+              </div>
+            )}
+
+            {/* Download Buttons */}
+            {reportData.absentees.length > 0 && (
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={downloadExcelReport}
+                  className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 flex items-center"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Download Excel
+                </button>
+                <button
+                  onClick={downloadPDFReport}
+                  className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 flex items-center"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  Download PDF
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1033,7 +1507,7 @@ const AttendanceReportTab = ({ classData, students, onToast }) => {
 };
 
 // Student Management Tab Component
-const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, user }) => {
+const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, user, onStudentProfilePictureUpload, onRemoveStudentProfilePicture, navigate }) => {
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -1244,6 +1718,7 @@ const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, 
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Photo</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Roll Number</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
@@ -1256,10 +1731,61 @@ const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, 
                 {students.map((student) => (
                   <tr key={student._id || student.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <div className="flex items-center">
+                        <div className="relative group">
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-300 flex items-center justify-center">
+                            {student.userId?.profileImage ? (
+                              <img 
+                                src={student.userId.profileImage} 
+                                alt={student.name} 
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-gray-600 font-semibold text-sm">
+                                {student.name?.charAt(0) || 'S'}
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Upload/Remove Overlay */}
+                          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
+                            <div className="flex flex-col items-center space-y-1 pointer-events-auto">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => onStudentProfilePictureUpload(e, student._id || student.id)}
+                                className="hidden"
+                                id={`student-profile-picture-upload-${student._id || student.id}`}
+                              />
+                              <label
+                                htmlFor={`student-profile-picture-upload-${student._id || student.id}`}
+                                className="text-white text-xs cursor-pointer hover:text-blue-200 transition-colors"
+                              >
+                                📷
+                              </label>
+                              {student.userId?.profileImage && (
+                                <button
+                                  onClick={() => onRemoveStudentProfilePicture(student._id || student.id)}
+                                  className="text-white text-xs hover:text-red-200 transition-colors"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {student.rollNumber}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {student.name}
+                      <button
+                        onClick={() => navigate(`/student-profile/${student._id || student.id}`)}
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors duration-200"
+                      >
+                        {student.name}
+                      </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {student.email}
@@ -1616,6 +2142,218 @@ const EditStudentModal = ({ student, onClose, onSave, loading }) => {
               </button>
             </div>
           </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Attendance Dates Tab Component
+const AttendanceDatesTab = ({ 
+  classData, 
+  attendanceStartDate, 
+  attendanceEndDate, 
+  setAttendanceStartDate, 
+  setAttendanceEndDate, 
+  updateAttendanceDates, 
+  testAttendanceDatesEndpoint,
+  updatingDates, 
+  onToast 
+}) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    // Validate dates
+    if (attendanceStartDate && attendanceEndDate) {
+      const startDate = new Date(attendanceStartDate);
+      const endDate = new Date(attendanceEndDate);
+      
+      if (startDate >= endDate) {
+        onToast('Start date must be before end date', 'error');
+        return;
+      }
+    }
+    
+    await updateAttendanceDates();
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <h3 className="text-lg font-medium text-gray-900">Attendance Date Range</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Set the date range for marking attendance. Attendance can only be marked within this period.
+        </p>
+      </div>
+      
+      <div className="px-6 py-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Start Date */}
+            <div>
+              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
+                Attendance Start Date
+              </label>
+              <input
+                type="date"
+                id="startDate"
+                value={attendanceStartDate}
+                onChange={(e) => setAttendanceStartDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Select start date"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Attendance marking will begin from this date
+              </p>
+            </div>
+
+            {/* End Date */}
+            <div>
+              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
+                Attendance End Date
+              </label>
+              <input
+                type="date"
+                id="endDate"
+                value={attendanceEndDate}
+                onChange={(e) => setAttendanceEndDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Select end date (optional)"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Attendance marking will end on this date (optional)
+              </p>
+            </div>
+          </div>
+
+          {/* Current Status */}
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Current Status</h4>
+            <div className="space-y-2 text-sm text-gray-600">
+              <div className="flex items-center">
+                <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                <span>
+                  <strong>Start Date:</strong> {attendanceStartDate ? new Date(attendanceStartDate).toLocaleDateString() : 'Not set'}
+                </span>
+              </div>
+              <div className="flex items-center">
+                <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                <span>
+                  <strong>End Date:</strong> {attendanceEndDate ? new Date(attendanceEndDate).toLocaleDateString() : 'Not set (unlimited)'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-between pt-4 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={testAttendanceDatesEndpoint}
+              className="px-4 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200 transition-colors"
+            >
+              Test Endpoint
+            </button>
+            <div className="flex space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAttendanceStartDate('');
+                  setAttendanceEndDate('');
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
+              >
+                Clear Dates
+              </button>
+              <button
+                type="submit"
+                disabled={updatingDates}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {updatingDates ? 'Updating...' : 'Update Dates'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Holiday Management Tab Component
+const HolidayManagementTab = ({ onMarkHoliday, onShowHolidayManagement }) => {
+  const [selectedDate, setSelectedDate] = useState('');
+
+  const handleMarkHoliday = () => {
+    if (!selectedDate) {
+      alert('Please select a date first');
+      return;
+    }
+    onMarkHoliday(selectedDate);
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <h2 className="text-lg font-medium text-gray-900">Holiday Management</h2>
+        <p className="text-sm text-gray-600 mt-1">
+          Mark holidays to prevent attendance marking on those dates
+        </p>
+      </div>
+      
+      <div className="p-6">
+        <div className="space-y-6">
+          {/* Quick Holiday Marking */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <h3 className="text-lg font-semibold text-amber-800 mb-3">Quick Holiday Marking</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Date to Mark as Holiday
+                </label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={handleMarkHoliday}
+                disabled={!selectedDate}
+                className="w-full bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              >
+                <span className="mr-2">🎉</span>
+                Mark as Holiday
+              </button>
+            </div>
+          </div>
+
+          {/* Holiday Management */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h3 className="text-lg font-semibold text-blue-800 mb-3">Manage Existing Holidays</h3>
+            <p className="text-sm text-blue-700 mb-4">
+              View, edit, or delete existing holidays for your department
+            </p>
+            <button
+              onClick={onShowHolidayManagement}
+              className="w-full bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center"
+            >
+              <span className="mr-2">📅</span>
+              View All Holidays
+            </button>
+          </div>
+
+          {/* Information */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Holiday Information</h3>
+            <div className="text-sm text-gray-700 space-y-2">
+              <p>• <strong>Sundays:</strong> Automatically treated as holidays (no attendance marking allowed)</p>
+              <p>• <strong>Marked Holidays:</strong> Faculty-declared holidays (no attendance marking allowed)</p>
+              <p>• <strong>Working Days:</strong> Only weekdays without holidays count towards attendance percentage</p>
+              <p>• <strong>Department-wise:</strong> Holidays are specific to your department</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

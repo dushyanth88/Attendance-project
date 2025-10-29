@@ -40,7 +40,7 @@ const normalizeSemester = (semInput) => {
 };
 
 const makeClassKey = ({ batch, year, semester, section }) => {
-  return `${batch}|${year}|${semester}${section ? `|${section}` : ''}`;
+  return `${batch}_${year}_${semester}${section ? `_${section}` : ''}`;
 };
 
 const router = express.Router();
@@ -347,127 +347,7 @@ async function getAttendanceData(classToQuery, dateFilter, currentUser) {
   };
 }
 
-// @desc    Get absentees report for a class and date range
-// @route   GET /api/report/absentees
-// @access  Faculty and above
-router.get('/absentees', async (req, res) => {
-  try {
-    const { class_id, date, startDate, endDate } = req.query;
-    const currentUser = req.user;
-
-    console.log('📊 Report request:', { class_id, date, startDate, endDate });
-    console.log('👤 Current user:', { id: currentUser._id, role: currentUser.role, assignedClass: currentUser.assignedClass });
-
-    // Get class to query - prioritize class_id from request
-    let classToQuery = class_id;
-    
-    // If no class_id provided, try to get from user's assigned class
-    if (!classToQuery) {
-      if (currentUser.assignedClass) {
-        classToQuery = currentUser.assignedClass;
-      } else if (Array.isArray(currentUser.assignedClasses) && currentUser.assignedClasses.length > 0) {
-        classToQuery = currentUser.assignedClasses[0];
-      } else {
-        // Try to get from Faculty model
-        const facultyDoc = await Faculty.findOne({ userId: currentUser._id });
-        if (facultyDoc && facultyDoc.assignedClass && facultyDoc.assignedClass !== 'None') {
-          classToQuery = facultyDoc.assignedClass;
-        }
-      }
-    }
-
-    console.log('🏫 Class to query:', classToQuery);
-
-    if (!classToQuery) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Class ID is required'
-      });
-    }
-
-    // Build date filter
-    let dateFilter = {};
-    if (date) {
-      // Single date
-      const targetDate = new Date(date);
-      const startOfDay = new Date(targetDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(targetDate);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
-      console.log('📅 Single date filter:', { startOfDay, endOfDay });
-    } else if (startDate && endDate) {
-      // Date range
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: start, $lte: end };
-      console.log('📅 Date range filter:', { start, end });
-    } else {
-      // Default to today if no date specified
-      const today = new Date();
-      const startOfDay = new Date(today);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
-      console.log('📅 Default today filter:', { startOfDay, endOfDay });
-    }
-
-    // Get attendance data using helper function
-    const { studentsInClass, allAttendanceRecords, absenteeRecords, attendanceMarked, message } = 
-      await getAttendanceData(classToQuery, dateFilter, currentUser);
-
-    // Format the absentee data with proper sorting
-    const absentees = absenteeRecords.map(record => {
-      const student = studentsInClass.find(s => s.userId.toString() === record.studentId._id.toString());
-      return {
-        id: record._id,
-        rollNo: student?.rollNumber || 'N/A',
-        studentName: student?.name || record.studentId.name,
-        date: record.date.toISOString().split('T')[0],
-        status: record.status,
-        reason: record.reason || '',
-        studentId: record.studentId._id
-      };
-    }).sort((a, b) => {
-      // Sort by roll number (convert to number for proper sorting)
-      const rollA = parseInt(a.rollNo) || 0;
-      const rollB = parseInt(b.rollNo) || 0;
-      return rollA - rollB;
-    });
-
-    console.log('✅ Report generated successfully:', {
-      class: classToQuery,
-      totalStudents: studentsInClass.length,
-      totalAttendanceRecords: allAttendanceRecords.length,
-      totalAbsentees: absentees.length,
-      attendanceMarked
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        class: classToQuery,
-        dateRange: { startDate, endDate, date },
-        absentees,
-        totalAbsentees: absentees.length,
-        totalAttendanceRecords: allAttendanceRecords.length,
-        attendanceMarked,
-        message
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Get absentees report error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
+// OLD ABSENTEES ENDPOINT REMOVED - Using new endpoint below
 
 // @desc    Export absentees report as PDF
 // @route   GET /api/report/absentees/export/pdf
@@ -1333,6 +1213,329 @@ router.get('/enhanced-absentees/export/excel', async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to generate enhanced Excel report'
+    });
+  }
+});
+
+// Test endpoint to check if report routes are working
+router.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Report routes are working',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// @desc    Generate absentees report
+// @route   GET /api/report/absentees
+// @access  Faculty and above
+router.get('/absentees', [
+  query('batch').notEmpty().withMessage('Batch is required'),
+  query('year').notEmpty().withMessage('Year is required'),
+  query('semester').isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1 and 8'),
+  query('section').optional().isIn(['A', 'B', 'C']).withMessage('Section must be one of: A, B, C'),
+  query('startDate').optional().isISO8601().withMessage('Start date must be a valid date'),
+  query('endDate').optional().isISO8601().withMessage('End date must be a valid date')
+], async (req, res) => {
+  try {
+    console.log('🔍 Absentees endpoint hit with query:', req.query);
+    console.log('🔍 User from auth middleware:', req.user);
+    
+    // Extract parameters - handle both old and new format
+    const { batch, year, semester, section, startDate, endDate, class_id, date } = req.query;
+    const currentUser = req.user;
+
+    // If using old format, try to extract from class_id
+    let actualBatch, actualYear, actualSemester, actualSection;
+    
+    if (class_id) {
+      // Parse class_id format: "2022-2026, 4th Year, Sem 7, Section A"
+      const parts = class_id.split(', ');
+      if (parts.length >= 4) {
+        actualBatch = parts[0];
+        actualYear = parts[1];
+        actualSemester = parts[2].replace('Sem ', '');
+        actualSection = parts[3].replace('Section ', '');
+      }
+    } else {
+      actualBatch = batch;
+      actualYear = year;
+      actualSemester = semester;
+      actualSection = section;
+    }
+
+    console.log('📊 Absentees report request:', { 
+      batch: actualBatch, 
+      year: actualYear, 
+      semester: actualSemester, 
+      section: actualSection, 
+      startDate, 
+      endDate, 
+      userId: currentUser._id 
+    });
+
+    // Validate required parameters
+    if (!actualBatch || !actualYear || !actualSemester) {
+      console.log('❌ Missing required parameters');
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: batch, year, semester are required'
+      });
+    }
+
+    // Normalize inputs
+    const normalizedYear = normalizeYear(actualYear);
+    const normalizedSemester = normalizeSemester(actualSemester);
+    
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { $gte: start, $lte: end };
+    } else {
+      // If no date range specified, get all attendance records
+      dateFilter = {};
+    }
+
+    // Get all students in the class - try different semester formats
+    let studentsInClass = [];
+    
+    // Try the normalized format first (without section filter like history-by-class)
+    const studentQuery1 = {
+      batch: actualBatch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department: currentUser.department,
+      status: 'active'
+    };
+    
+    console.log('🔍 Student query (normalized):', studentQuery1);
+    studentsInClass = await Student.find(studentQuery1)
+      .populate('userId', 'name email mobile')
+      .sort({ rollNumber: 1 });
+
+    console.log(`👥 Found ${studentsInClass.length} students with normalized format`);
+
+    // If no students found, try with raw semester format
+    if (studentsInClass.length === 0) {
+      const studentQuery2 = {
+        batch: actualBatch,
+        year: normalizedYear,
+        semester: actualSemester, // Use raw semester format
+        department: currentUser.department,
+        status: 'active'
+      };
+      
+      console.log('🔍 Student query (raw):', studentQuery2);
+      studentsInClass = await Student.find(studentQuery2)
+        .populate('userId', 'name email mobile')
+        .sort({ rollNumber: 1 });
+      
+      console.log(`👥 Found ${studentsInClass.length} students with raw format`);
+    }
+
+    // If still no students found, try with integer semester
+    if (studentsInClass.length === 0) {
+      const studentQuery3 = {
+        batch: actualBatch,
+        year: normalizedYear,
+        semester: parseInt(actualSemester), // Try integer format
+        department: currentUser.department,
+        status: 'active'
+      };
+      
+      console.log('🔍 Student query (integer):', studentQuery3);
+      studentsInClass = await Student.find(studentQuery3)
+        .populate('userId', 'name email mobile')
+        .sort({ rollNumber: 1 });
+      
+      console.log(`👥 Found ${studentsInClass.length} students with integer format`);
+    }
+
+    // Debug: Check what sections the students actually have
+    if (studentsInClass.length > 0) {
+      console.log('🔍 Student sections:', studentsInClass.map(s => ({
+        rollNumber: s.rollNumber,
+        name: s.userId.name,
+        section: s.section
+      })));
+    }
+
+    // Filter by section after finding students (like history-by-class does)
+    if (actualSection && studentsInClass.length > 0) {
+      const originalCount = studentsInClass.length;
+      studentsInClass = studentsInClass.filter(student => student.section === actualSection);
+      console.log(`🔍 Filtered by section '${actualSection}': ${originalCount} -> ${studentsInClass.length} students`);
+      
+      // If no students after section filter, try without section filter
+      if (studentsInClass.length === 0) {
+        console.log('⚠️ No students found with section filter, using all students');
+        studentsInClass = await Student.find({
+          batch: actualBatch,
+          year: normalizedYear,
+          semester: normalizedSemester,
+          department: currentUser.department,
+          status: 'active'
+        })
+          .populate('userId', 'name email mobile')
+          .sort({ rollNumber: 1 });
+        console.log(`👥 Using all students without section filter: ${studentsInClass.length} students`);
+      }
+    }
+
+    if (studentsInClass.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          classInfo: {
+            batch: actualBatch,
+            year: actualYear,
+            semester: actualSemester,
+            section: actualSection || 'All',
+            department: currentUser.department
+          },
+          reportInfo: {
+            totalStudents: 0,
+            totalAbsentees: 0,
+            totalWorkingDays: 0,
+            holidaysCount: 0,
+            dateRange: startDate && endDate ? `${startDate} to ${endDate}` : 'All dates'
+          },
+          absentees: []
+        }
+      });
+    }
+
+    // Get attendance records for the students
+    const studentUserIds = studentsInClass.map(student => student.userId._id);
+    
+    // Determine the correct semester format for classId generation
+    let semesterForClassId = normalizedSemester;
+    if (studentsInClass.length > 0) {
+      // Use the semester format that actually found students
+      const firstStudent = studentsInClass[0];
+      if (firstStudent.classId) {
+        // Extract semester from existing classId
+        const classIdParts = firstStudent.classId.split('_');
+        if (classIdParts.length >= 3) {
+          semesterForClassId = classIdParts[2]; // Get semester part
+        }
+      }
+    }
+    
+    const classId = makeClassKey({ batch: actualBatch, year: normalizedYear, semester: semesterForClassId, section: actualSection });
+    console.log('🔑 Generated classId:', classId);
+    
+    const attendanceRecords = await Attendance.find({
+      studentId: { $in: studentUserIds },
+      classId,
+      date: dateFilter
+    })
+    .populate('studentId', 'name email mobile')
+    .sort({ date: -1, 'studentId.name': 1 });
+
+    console.log(`📊 Found ${attendanceRecords.length} attendance records`);
+
+    // Calculate absentees data
+    const studentAbsenceMap = {};
+    
+    // Initialize all students
+    studentsInClass.forEach(student => {
+      studentAbsenceMap[student.userId._id] = {
+        studentId: student.userId._id,
+        rollNumber: student.rollNumber,
+        name: student.userId.name,
+        mobile: student.userId.mobile,
+        totalAbsentDays: 0,
+        totalPresentDays: 0,
+        absentDates: [],
+        reason: '',
+        actionTaken: ''
+      };
+    });
+
+    // Process attendance records
+    attendanceRecords.forEach(record => {
+      const studentId = record.studentId._id;
+      if (studentAbsenceMap[studentId]) {
+        if (record.status === 'Absent') {
+          studentAbsenceMap[studentId].totalAbsentDays++;
+          studentAbsenceMap[studentId].absentDates.push(record.date.toISOString().split('T')[0]);
+          if (record.reason) {
+            studentAbsenceMap[studentId].reason = record.reason;
+          }
+          if (record.actionTaken) {
+            studentAbsenceMap[studentId].actionTaken = record.actionTaken;
+          }
+        } else if (record.status === 'Present') {
+          studentAbsenceMap[studentId].totalPresentDays++;
+        }
+      }
+    });
+
+    // Calculate attendance percentages
+    const totalWorkingDays = attendanceRecords.length > 0 ? 
+      new Set(attendanceRecords.map(r => r.date.toISOString().split('T')[0])).size : 0;
+    
+    Object.values(studentAbsenceMap).forEach(student => {
+      const totalDays = student.totalAbsentDays + student.totalPresentDays;
+      student.attendancePercentage = totalDays > 0 ? (student.totalPresentDays / totalDays) * 100 : 100;
+      student.totalWorkingDays = totalWorkingDays;
+    });
+
+    // Filter only students who have been absent (totalAbsentDays > 0)
+    const absenteesData = Object.values(studentAbsenceMap).filter(student => student.totalAbsentDays > 0);
+
+    // Format the absentees report data
+    const absenteesReport = absenteesData.map((student, index) => ({
+      sNo: index + 1,
+      rollNumber: student.rollNumber,
+      name: student.name,
+      totalDaysAbsent: student.totalAbsentDays,
+      reason: student.reason || 'Not specified',
+      actionTaken: student.actionTaken || 'No action taken',
+      attendancePercentage: student.attendancePercentage,
+      absentDates: student.absentDates || []
+    }));
+
+    console.log('✅ Absentees report generated successfully:', {
+      totalStudents: studentsInClass.length,
+      totalAbsentees: absenteesReport.length,
+      totalWorkingDays,
+      holidaysCount: 0
+    });
+
+    res.json({
+      success: true,
+      data: {
+        classInfo: {
+          batch: actualBatch,
+          year: actualYear,
+          semester: actualSemester,
+          section: actualSection || 'All',
+          department: currentUser.department
+        },
+        reportInfo: {
+          totalStudents: studentsInClass.length,
+          totalAbsentees: absenteesReport.length,
+          totalWorkingDays,
+          holidaysCount: 0,
+          dateRange: startDate && endDate ? `${startDate} to ${endDate}` : 'All dates'
+        },
+        absentees: absenteesReport
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating absentees report:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to generate absentees report',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });

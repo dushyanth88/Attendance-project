@@ -216,8 +216,13 @@ async function getStandardizedClassData(facultyData, classContext) {
     // Always use the facultyId from the authorization result
     const standardizedFacultyId = facultyId;
     
+    // Convert semester to string format if it's a number
+    const semesterString = typeof classContext.semester === 'number' 
+      ? `Sem ${classContext.semester}` 
+      : classContext.semester;
+    
     // Generate standardized classId
-    const classId = `${classContext.batch}_${classContext.year}_${classContext.semester}_${classContext.section || 'A'}`;
+    const classId = `${classContext.batch}_${classContext.year}_${semesterString}_${classContext.section || 'A'}`;
     
     // Generate classAssigned format
     const yearNumber = classContext.year.includes('1st') ? '1' : 
@@ -231,7 +236,7 @@ async function getStandardizedClassData(facultyData, classContext) {
       classAssigned,
       batch: classContext.batch,
       year: classContext.year,
-      semester: classContext.semester,
+      semester: semesterString,
       section: classContext.section || 'A',
       department: classContext.department
     });
@@ -244,7 +249,7 @@ async function getStandardizedClassData(facultyData, classContext) {
         classAssigned,
         batch: classContext.batch,
         year: classContext.year,
-        semester: classContext.semester,
+        semester: semesterString,
         section: classContext.section || 'A',
         department: classContext.department,
         source

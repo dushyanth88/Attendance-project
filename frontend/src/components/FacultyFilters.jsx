@@ -37,16 +37,18 @@ const FacultyFilters = ({ onSearch, onFilter, onSort, onClear }) => {
   const years = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
   const sections = ['A', 'B', 'C'];
   
-  // Generate batch ranges
+  // Generate batch ranges starting from 2022
   const generateBatches = () => {
-    const currentYear = new Date().getFullYear();
     const batches = [];
-    for (let i = 0; i < 10; i++) {
-      const startYear = currentYear + i;
-      const endYear = startYear + 4;
-      batches.push(`${startYear}-${endYear}`);
+    const startYear = 2022;
+    const endYear = 2030;
+    
+    for (let year = startYear; year <= endYear; year++) {
+      const batchRange = `${year}-${year + 4}`;
+      batches.push(batchRange);
     }
-    return batches;
+    
+    return batches.reverse(); // Show newest first
   };
 
   return (

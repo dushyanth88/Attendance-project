@@ -1,5 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
+import mongoose from 'mongoose';
 import Attendance from '../models/Attendance.js';
 import User from '../models/User.js';
 import Student from '../models/Student.js';
@@ -438,14 +439,25 @@ router.post('/mark', authenticate, facultyAndAbove, [
 
     // Authorization: Faculty can only mark attendance for their assigned class
     if (currentUser.role === 'faculty') {
-      const hasUserAssignment = Array.isArray(currentUser.assignedClasses) && currentUser.assignedClasses.includes(classAssigned);
-      let hasFacultyAssignment = false;
-      if (!hasUserAssignment) {
-        const facultyDoc = await Faculty.findOne({ userId: currentUser._id });
-        hasFacultyAssignment = facultyDoc && facultyDoc.assignedClass === classAssigned;
-      }
-      if (!hasUserAssignment && !hasFacultyAssignment) {
-        return res.status(403).json({ status: 'error', message: 'You are not assigned to this class' });
+      // Check if faculty is assigned to this class through assignedClasses array
+      const facultyDoc = await Faculty.findOne({ 
+        userId: currentUser._id,
+        'assignedClasses.classAssigned': classAssigned,
+        'assignedClasses.active': true,
+        status: 'active'
+      });
+
+      // Fallback: Check legacy single-class assignment
+      if (!facultyDoc) {
+        const legacyFacultyDoc = await Faculty.findOne({ 
+          userId: currentUser._id,
+          assignedClass: classAssigned,
+          status: 'active'
+        });
+        
+        if (!legacyFacultyDoc) {
+          return res.status(403).json({ status: 'error', message: 'You are not assigned to this class' });
+        }
       }
     }
 
@@ -537,6 +549,14 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     const { studentId } = req.params;
     const { startDate, endDate, page = 1, limit = 50 } = req.query;
 
+    console.log('🔍 Student attendance request:', {
+      studentId,
+      userId: req.user._id.toString(),
+      userRole: req.user.role,
+      startDate,
+      endDate
+    });
+
     // Check if user can access this student's data
     if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
       return res.status(403).json({
@@ -546,7 +566,14 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     }
 
     // Build filter using localDate for simpler timezone handling
-    const filter = { studentId };
+    let filter;
+    try {
+      filter = { studentId: new mongoose.Types.ObjectId(studentId) };
+    } catch (error) {
+      console.log('⚠️ Invalid ObjectId, trying string match:', studentId);
+      filter = { studentId };
+    }
+    
     if (startDate || endDate) {
       filter.localDate = {};
       if (startDate) {
@@ -559,6 +586,8 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       }
     }
 
+    console.log('🔍 Attendance filter:', filter);
+
     const skip = (page - 1) * limit;
 
     const attendanceDocs = await Attendance.find(filter)
@@ -566,6 +595,30 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       .sort({ date: -1 })
       .skip(skip)
       .limit(parseInt(limit));
+
+    console.log('📊 Found attendance records:', attendanceDocs.length);
+    console.log('📋 Sample attendance records:', attendanceDocs.slice(0, 3).map(doc => ({
+      studentId: doc.studentId,
+      date: doc.date,
+      localDate: doc.localDate,
+      status: doc.status
+    })));
+
+    // Also check if there are any attendance records for this studentId at all
+    let allRecordsForStudent;
+    try {
+      allRecordsForStudent = await Attendance.find({ studentId: new mongoose.Types.ObjectId(studentId) }).limit(5);
+    } catch (error) {
+      console.log('⚠️ Invalid ObjectId for all records query, trying string match:', studentId);
+      allRecordsForStudent = await Attendance.find({ studentId }).limit(5);
+    }
+    console.log('🔍 All records for studentId:', allRecordsForStudent.length);
+    console.log('📋 Sample records:', allRecordsForStudent.map(doc => ({
+      studentId: doc.studentId,
+      date: doc.date,
+      localDate: doc.localDate,
+      status: doc.status
+    })));
 
     const total = await Attendance.countDocuments(filter);
 
@@ -596,13 +649,69 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     }));
 
     // Prefer returning roll number if available
-    const studentDoc = await Student.findOne({ userId: studentId });
+    let studentDoc;
+    try {
+      studentDoc = await Student.findOne({ userId: new mongoose.Types.ObjectId(studentId) });
+    } catch (error) {
+      console.log('⚠️ Invalid ObjectId for student lookup, trying string match:', studentId);
+      studentDoc = await Student.findOne({ userId: studentId });
+    }
     const studentIdentifier = studentDoc?.rollNumber || studentId;
+
+    console.log('👤 Student document lookup:', {
+      studentId,
+      foundStudent: !!studentDoc,
+      studentRollNumber: studentDoc?.rollNumber,
+      studentName: studentDoc?.name,
+      studentUserId: studentDoc?.userId
+    });
+
+    // Get attendance start date from class assignment
+    let attendanceStartDate = null;
+    if (studentDoc) {
+      // Extract semester number from string format like "Sem 7" -> 7
+      let semesterNumber = studentDoc.semester;
+      if (typeof semesterNumber === 'string' && semesterNumber.includes('Sem')) {
+        semesterNumber = parseInt(semesterNumber.replace('Sem ', ''), 10);
+      } else if (typeof semesterNumber === 'string') {
+        semesterNumber = parseInt(semesterNumber, 10);
+      }
+      
+      console.log('🔍 Looking for class assignment:', {
+        batch: studentDoc.batch,
+        year: studentDoc.year,
+        semester: semesterNumber,
+        section: studentDoc.section
+      });
+      
+      const classAssignment = await ClassAssignment.findOne({
+        batch: studentDoc.batch,
+        year: studentDoc.year,
+        semester: semesterNumber,
+        section: studentDoc.section,
+        active: true
+      });
+      
+      if (classAssignment && classAssignment.attendanceStartDate) {
+        attendanceStartDate = classAssignment.attendanceStartDate.toISOString().split('T')[0];
+        console.log('📅 Found attendance start date:', attendanceStartDate);
+      } else {
+        console.log('📅 No attendance start date found for student');
+        if (classAssignment) {
+          console.log('📅 Class assignment found but no start date set');
+        } else {
+          console.log('📅 No class assignment found');
+        }
+      }
+    }
 
     res.status(200).json({
       student_id: studentIdentifier,
-        attendance,
-      overall_percentage: `${overallPercentage}%`
+      roll_number: studentDoc?.rollNumber || null,
+      student_name: studentDoc?.name || null,
+      attendance,
+      overall_percentage: `${overallPercentage}%`,
+      attendance_start_date: attendanceStartDate
     });
   } catch (error) {
     console.error('Get student attendance error:', error);
@@ -1120,17 +1229,95 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
     // Authorization: verify faculty is advisor for this class
     const faculty = await Faculty.findOne({
       userId: currentUser._id,
-      is_class_advisor: true,
-      batch,
-      year: normalizedYear,
-      semester: parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
-      ...(section ? { section } : {}),
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': normalizedYear,
+      'assignedClasses.semester': parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      'assignedClasses.section': section || 'A',
+      'assignedClasses.active': true,
       department: currentUser.department,
       status: 'active'
     });
+
+    // Fallback: Check legacy single-class assignment
     if (!faculty) {
-      return res.status(403).json({ status: 'error', message: 'You are not authorized to mark attendance for this class' });
+      const legacyFaculty = await Faculty.findOne({
+        userId: currentUser._id,
+        is_class_advisor: true,
+        batch,
+        year: normalizedYear,
+        semester: parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+        ...(section ? { section } : {}),
+        department: currentUser.department,
+        status: 'active'
+      });
+      
+      if (!legacyFaculty) {
+        return res.status(403).json({ status: 'error', message: 'You are not authorized to mark attendance for this class' });
+      }
     }
+
+      // Check attendance date range from ClassAssignment
+      const classAssignment = await ClassAssignment.findOne({
+        facultyId: currentUser._id,
+        batch,
+        year: normalizedYear,
+        semester: parseInt(String(req.body.semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+        section: section || 'A',
+        active: true
+      });
+
+      if (classAssignment) {
+        const attendanceDate = req.body.date ? new Date(req.body.date) : new Date();
+        const attendanceDateString = attendanceDate.toISOString().split('T')[0];
+        
+        // Check if attendance date is before start date
+        if (classAssignment.attendanceStartDate) {
+          const startDateString = new Date(classAssignment.attendanceStartDate).toISOString().split('T')[0];
+          if (attendanceDateString < startDateString) {
+            return res.status(400).json({ 
+              status: 'error', 
+              message: `Attendance can only be marked from ${startDateString}. Please contact your HOD to update the attendance start date.` 
+            });
+          }
+        }
+        
+        // Check if attendance date is after end date
+        if (classAssignment.attendanceEndDate) {
+          const endDateString = new Date(classAssignment.attendanceEndDate).toISOString().split('T')[0];
+          if (attendanceDateString > endDateString) {
+            return res.status(400).json({ 
+              status: 'error', 
+              message: `Attendance period has ended on ${endDateString}. Please contact your HOD to extend the attendance period.` 
+            });
+          }
+        }
+      }
+
+      // Check if the date is a Sunday
+      const attendanceDate = req.body.date ? new Date(req.body.date) : new Date();
+      const dayOfWeek = attendanceDate.getDay();
+      if (dayOfWeek === 0) { // Sunday
+        return res.status(400).json({
+          status: 'error',
+          message: 'Attendance cannot be marked on Sundays. Sundays are automatically treated as holidays.'
+        });
+      }
+
+      // Check if the date is a declared holiday
+      const Holiday = (await import('../models/Holiday.js')).default;
+      const attendanceDateString = attendanceDate.toISOString().split('T')[0];
+      const holiday = await Holiday.findOne({
+        holidayDate: attendanceDateString,
+        department: currentUser.department,
+        isDeleted: false
+      });
+
+      if (holiday) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Attendance cannot be marked on ${attendanceDateString}. This date has been declared as a holiday: ${holiday.reason}`
+        });
+      }
 
     // Get the selected date in IST and convert to YYYY-MM-DD string format
     let requestDateString;
@@ -1152,6 +1339,7 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       batch,
       year: normalizedYear,
       semester: normalizedSemester,
+      section: section || 'A', // Add section filter to only get students from the specific section
       department: currentUser.department,
       status: 'active'
     }).select('rollNumber userId');
@@ -1396,25 +1584,38 @@ router.get('/history-by-class', authenticate, facultyAndAbove, async (req, res) 
     // Authorization
     const faculty = await Faculty.findOne({
       userId: currentUser._id,
-      is_class_advisor: true,
-      batch,
-      year: normalizedYear,
-      semester: parseInt(String(semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
-      ...(section ? { section } : {}),
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': normalizedYear,
+      'assignedClasses.semester': parseInt(String(semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+      'assignedClasses.section': section || 'A',
+      'assignedClasses.active': true,
       department: currentUser.department,
       status: 'active'
     });
-    
-    console.log('👨‍🏫 Faculty authorization check:', faculty ? '✅ Authorized' : '❌ Not authorized');
-    
+
+    // Fallback: Check legacy single-class assignment
     if (!faculty) {
-      return res.status(403).json({ status: 'error', message: 'You are not authorized to view attendance for this class' });
+      const legacyFaculty = await Faculty.findOne({
+        userId: currentUser._id,
+        is_class_advisor: true,
+        batch,
+        year: normalizedYear,
+        semester: parseInt(String(semester), 10) || parseInt(String(normalizedSemester).match(/\d+/)?.[0] || '0', 10),
+        ...(section ? { section } : {}),
+        department: currentUser.department,
+        status: 'active'
+      });
+      
+      if (!legacyFaculty) {
+        return res.status(403).json({ status: 'error', message: 'You are not authorized to view attendance for this class' });
+      }
     }
 
     const studentsInClass = await Student.find({
       batch,
       year: normalizedYear,
       semester: normalizedSemester,
+      section: section || 'A', // Add section filter to only get students from the specific section
       department: currentUser.department,
       status: 'active'
     }).select('rollNumber name userId');

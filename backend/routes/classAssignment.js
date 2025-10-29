@@ -345,10 +345,12 @@ router.get('/available-classes', authenticate, hodAndAbove, async (req, res) => 
     // Generate available class combinations
     const currentYear = new Date().getFullYear();
     const batchRanges = [];
+    // Start from 2022, but ensure we have at least 10 years of batches
+    const startYear = Math.min(2022, currentYear);
     for (let i = 0; i < 10; i++) {
-      const startYear = currentYear + i;
-      const endYear = startYear + 4;
-      batchRanges.push(`${startYear}-${endYear}`);
+      const batchStartYear = startYear + i;
+      const batchEndYear = batchStartYear + 4;
+      batchRanges.push(`${batchStartYear}-${batchEndYear}`);
     }
 
     const years = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
@@ -444,8 +446,12 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     // Check if faculty has access to this assignment
-    if (assignment.facultyId._id.toString() !== currentUser._id.toString() && 
-        !['hod', 'admin', 'principal'].includes(currentUser.role)) {
+    // Allow access if user is the assigned faculty OR if user is HOD/admin/principal OR if user is in the same department
+    const isAssignedFaculty = assignment.facultyId._id.toString() === currentUser._id.toString();
+    const isHigherRole = ['hod', 'admin', 'principal'].includes(currentUser.role);
+    const isSameDepartment = assignment.departmentId.toString() === currentUser._id.toString();
+    
+    if (!isAssignedFaculty && !isHigherRole && !isSameDepartment) {
       return res.status(403).json({
         status: 'error',
         message: 'You do not have access to this class assignment'
@@ -465,7 +471,9 @@ router.get('/:id', authenticate, async (req, res) => {
         assignedBy: assignment.assignedBy,
         assignedDate: assignment.assignedDate,
         active: assignment.active,
-        notes: assignment.notes
+        notes: assignment.notes,
+        attendanceStartDate: assignment.attendanceStartDate,
+        attendanceEndDate: assignment.attendanceEndDate
       }
     });
 
@@ -541,6 +549,166 @@ router.delete('/:id', authenticate, hodAndAbove, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Server error while removing class assignment'
+    });
+  }
+});
+
+// @desc    Test endpoint for attendance dates
+// @route   GET /api/class-assignment/:id/attendance-dates/test
+// @access  Faculty and above
+router.get('/:id/attendance-dates/test', authenticate, async (req, res) => {
+  try {
+    console.log('🧪 Test endpoint called:', {
+      id: req.params.id,
+      user: req.user?.id
+    });
+    
+    res.json({
+      status: 'success',
+      message: 'Test endpoint working',
+      data: {
+        id: req.params.id,
+        userId: req.user._id,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Test endpoint error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Test endpoint error'
+    });
+  }
+});
+
+// @desc    Update attendance date range for a class assignment
+// @route   PUT /api/class-assignment/:id/attendance-dates
+// @access  Faculty and above
+router.put('/:id/attendance-dates', [
+  body('attendanceStartDate').optional().custom((value) => {
+    if (value === null || value === undefined || value === '') return true;
+    return new Date(value).toString() !== 'Invalid Date';
+  }).withMessage('Start date must be a valid date'),
+  body('attendanceEndDate').optional().custom((value) => {
+    if (value === null || value === undefined || value === '') return true;
+    return new Date(value).toString() !== 'Invalid Date';
+  }).withMessage('End date must be a valid date')
+], authenticate, async (req, res) => {
+  try {
+    console.log('🔄 Attendance dates update request:', {
+      id: req.params.id,
+      body: req.body,
+      user: req.user?.id
+    });
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { id } = req.params;
+    const { attendanceStartDate, attendanceEndDate } = req.body;
+    const currentUser = req.user;
+
+    console.log('📋 Processing request:', {
+      id,
+      attendanceStartDate,
+      attendanceEndDate,
+      currentUserId: currentUser._id
+    });
+
+    const assignment = await ClassAssignment.findById(id);
+    console.log('🔍 Found assignment:', assignment ? 'Yes' : 'No');
+
+    if (!assignment) {
+      console.log('❌ Assignment not found for ID:', id);
+      return res.status(404).json({
+        status: 'error',
+        message: 'Class assignment not found'
+      });
+    }
+
+    // Check if faculty has access to this assignment
+    const isAssignedFaculty = assignment.facultyId._id.toString() === currentUser._id.toString();
+    const isHigherRole = ['hod', 'admin', 'principal'].includes(currentUser.role);
+    const isSameDepartment = assignment.departmentId.toString() === currentUser._id.toString();
+    
+    console.log('🔐 Authorization check:', {
+      isAssignedFaculty,
+      isHigherRole,
+      isSameDepartment,
+      facultyId: assignment.facultyId._id.toString(),
+      currentUserId: currentUser._id.toString(),
+      userRole: currentUser.role,
+      departmentId: assignment.departmentId.toString()
+    });
+    
+    if (!isAssignedFaculty && !isHigherRole && !isSameDepartment) {
+      console.log('❌ Access denied for user:', currentUser._id);
+      return res.status(403).json({
+        status: 'error',
+        message: 'You do not have access to this class assignment'
+      });
+    }
+
+    // Validate date range
+    if (attendanceStartDate && attendanceEndDate) {
+      const startDate = new Date(attendanceStartDate);
+      const endDate = new Date(attendanceEndDate);
+      
+      if (startDate >= endDate) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Start date must be before end date'
+        });
+      }
+    }
+
+    // Update the assignment
+    const updateData = {};
+    if (attendanceStartDate !== undefined) {
+      updateData.attendanceStartDate = attendanceStartDate ? new Date(attendanceStartDate) : null;
+    }
+    if (attendanceEndDate !== undefined) {
+      updateData.attendanceEndDate = attendanceEndDate ? new Date(attendanceEndDate) : null;
+    }
+
+    const updatedAssignment = await ClassAssignment.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    ).populate('facultyId', 'name email').populate('assignedBy', 'name email');
+
+    res.json({
+      status: 'success',
+      message: 'Attendance date range updated successfully',
+      data: {
+        id: updatedAssignment._id,
+        batch: updatedAssignment.batch,
+        year: updatedAssignment.year,
+        semester: updatedAssignment.semester,
+        section: updatedAssignment.section,
+        departmentId: updatedAssignment.departmentId,
+        facultyId: updatedAssignment.facultyId,
+        assignedBy: updatedAssignment.assignedBy,
+        assignedDate: updatedAssignment.assignedDate,
+        active: updatedAssignment.active,
+        notes: updatedAssignment.notes,
+        attendanceStartDate: updatedAssignment.attendanceStartDate,
+        attendanceEndDate: updatedAssignment.attendanceEndDate
+      }
+    });
+
+  } catch (error) {
+    console.error('Error updating attendance date range:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error while updating attendance date range'
     });
   }
 });

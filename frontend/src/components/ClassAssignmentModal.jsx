@@ -179,14 +179,16 @@ const ClassAssignmentModal = ({ isOpen, onClose, faculty, onAssignmentUpdated })
   };
 
   const getAvailableBatches = () => {
-    const currentYear = new Date().getFullYear();
     const batches = [];
-    for (let i = 0; i < 10; i++) {
-      const startYear = currentYear + i;
-      const endYear = startYear + 4;
-      batches.push(`${startYear}-${endYear}`);
+    const startYear = 2022;
+    const endYear = 2030;
+    
+    for (let year = startYear; year <= endYear; year++) {
+      const batchRange = `${year}-${year + 4}`;
+      batches.push(batchRange);
     }
-    return batches;
+    
+    return batches.reverse(); // Show newest first
   };
 
   const getFilteredAvailableClasses = () => {

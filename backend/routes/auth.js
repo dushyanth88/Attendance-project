@@ -161,7 +161,8 @@ router.get('/me', authenticate, async (req, res) => {
         assignedClasses: req.user.assignedClasses,
         status: req.user.status,
         lastLogin: req.user.lastLogin,
-        createdAt: req.user.createdAt
+        createdAt: req.user.createdAt,
+        profileImage: req.user.profileImage
       }
     });
   } catch (error) {

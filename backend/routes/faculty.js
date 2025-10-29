@@ -1,5 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
+import multer from 'multer';
 import Faculty from '../models/Faculty.js';
 import User from '../models/User.js';
 import ClassAssignment from '../models/ClassAssignment.js';
@@ -8,6 +9,29 @@ import { authenticate, hodAndAbove, facultyAndAbove } from '../middleware/auth.j
 import { createStudentWithStandardizedData } from '../services/studentCreationService.js';
 
 const router = express.Router();
+
+// Configure multer for profile picture uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB limit for profile pictures
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'image/jpeg',
+      'image/jpg', 
+      'image/png',
+      'image/gif',
+      'image/webp'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.'), false);
+    }
+  }
+});
 
 // Profile route for individual faculty (less restrictive)
 router.get('/profile/:userId', authenticate, async (req, res) => {
@@ -23,7 +47,7 @@ router.get('/profile/:userId', authenticate, async (req, res) => {
     }
 
     // Find faculty by userId
-    const faculty = await Faculty.findOne({ userId }).populate('userId', 'name email department role');
+    const faculty = await Faculty.findOne({ userId }).populate('userId', 'name email department role profileImage');
     
     if (!faculty) {
       return res.status(404).json({
@@ -32,6 +56,8 @@ router.get('/profile/:userId', authenticate, async (req, res) => {
       });
     }
 
+    console.log('🖼️ Faculty profile response - profileImage:', faculty.userId.profileImage);
+    
     res.json({
       success: true,
       data: {
@@ -47,11 +73,321 @@ router.get('/profile/:userId', authenticate, async (req, res) => {
         year: faculty.year,
         semester: faculty.semester,
         status: faculty.status,
+        profileImage: faculty.userId.profileImage,
         advisorAssignment: faculty.getAdvisorAssignment()
       }
     });
   } catch (error) {
     console.error('Error fetching faculty profile:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error'
+    });
+  }
+});
+
+// @desc    Upload profile picture
+// @route   POST /api/faculty/profile-picture
+// @access  Faculty and above
+router.post('/profile-picture', authenticate, facultyAndAbove, (req, res, next) => {
+  upload.single('profilePicture')(req, res, (err) => {
+    if (err) {
+      console.error('❌ Multer error:', err);
+      return res.status(400).json({
+        success: false,
+        msg: err.message || 'File upload error'
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    console.log('📸 Profile picture upload request received');
+    console.log('🔐 User:', req.user ? 'Authenticated' : 'Not authenticated');
+    console.log('📁 File:', req.file ? 'Present' : 'Missing');
+    console.log('📋 Body:', req.body);
+    
+    if (!req.file) {
+      console.log('❌ No file uploaded');
+      return res.status(400).json({
+        success: false,
+        msg: 'No profile picture uploaded'
+      });
+    }
+
+    console.log('📁 File details:', {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
+
+    const currentUser = req.user;
+    
+    // Convert image to base64 for storage
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    
+    // Update user's profile image
+    const updatedUser = await User.findByIdAndUpdate(
+      currentUser._id,
+      { profileImage: base64Image },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        msg: 'User not found'
+      });
+    }
+
+    console.log('✅ Profile image saved successfully:', {
+      userId: updatedUser._id,
+      profileImageLength: updatedUser.profileImage ? updatedUser.profileImage.length : 0,
+      profileImagePreview: updatedUser.profileImage ? updatedUser.profileImage.substring(0, 50) + '...' : 'null'
+    });
+
+    res.json({
+      success: true,
+      msg: 'Profile picture uploaded successfully',
+      data: {
+        profileImage: updatedUser.profileImage
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error'
+    });
+  }
+});
+
+// @desc    Remove profile picture
+// @route   DELETE /api/faculty/profile-picture
+// @access  Faculty and above
+router.delete('/profile-picture', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const currentUser = req.user;
+    
+    // Remove profile image
+    const updatedUser = await User.findByIdAndUpdate(
+      currentUser._id,
+      { profileImage: null },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        msg: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      msg: 'Profile picture removed successfully'
+    });
+  } catch (error) {
+    console.error('Error removing profile picture:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error'
+    });
+  }
+});
+
+// @desc    Upload student profile picture (Class Advisor only)
+// @route   POST /api/faculty/student-profile-picture/:studentId
+// @access  Faculty and above (Class Advisor only)
+router.post('/student-profile-picture/:studentId', authenticate, facultyAndAbove, (req, res, next) => {
+  upload.single('profilePicture')(req, res, (err) => {
+    if (err) {
+      console.error('❌ Multer error:', err);
+      return res.status(400).json({
+        success: false,
+        msg: err.message || 'File upload error'
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const currentUser = req.user;
+    
+    console.log('📸 Student profile picture upload request received');
+    console.log('🔐 User:', req.user ? 'Authenticated' : 'Not authenticated');
+    console.log('👨‍🎓 Student ID:', studentId);
+    console.log('📁 File:', req.file ? 'Present' : 'Missing');
+    
+    if (!req.file) {
+      console.log('❌ No file uploaded');
+      return res.status(400).json({
+        success: false,
+        msg: 'No profile picture uploaded'
+      });
+    }
+
+    console.log('📁 File details:', {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
+
+    // Find the student
+    const student = await Student.findById(studentId).populate('userId', 'name email');
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        msg: 'Student not found'
+      });
+    }
+
+    // Check if current user is the class advisor for this student
+    // Convert semester from "Sem 7" format to number 7
+    const semesterNumber = typeof student.semester === 'string' && student.semester.startsWith('Sem ') 
+      ? parseInt(student.semester.replace('Sem ', '')) 
+      : student.semester;
+    
+    const classAssignment = await ClassAssignment.findOne({
+      facultyId: currentUser._id,
+      batch: student.batch,
+      year: student.year,
+      semester: semesterNumber,
+      section: student.section,
+      active: true
+    });
+
+    if (!classAssignment) {
+      return res.status(403).json({
+        success: false,
+        msg: 'Access denied. You are not the class advisor for this student.'
+      });
+    }
+
+    console.log('✅ Class advisor verification passed for student:', student.userId.name);
+
+    // Convert image to base64 for storage
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    
+    // Update student's profile image
+    const updatedUser = await User.findByIdAndUpdate(
+      student.userId._id,
+      { profileImage: base64Image },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        msg: 'Student user not found'
+      });
+    }
+
+    console.log('✅ Student profile image saved successfully:', {
+      studentId: student._id,
+      studentName: student.userId.name,
+      userId: updatedUser._id,
+      profileImageLength: updatedUser.profileImage ? updatedUser.profileImage.length : 0,
+      profileImagePreview: updatedUser.profileImage ? updatedUser.profileImage.substring(0, 50) + '...' : 'null'
+    });
+
+    res.json({
+      success: true,
+      msg: 'Student profile picture uploaded successfully',
+      data: {
+        studentId: student._id,
+        studentName: student.userId.name,
+        profileImage: updatedUser.profileImage
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading student profile picture:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error'
+    });
+  }
+});
+
+// @desc    Remove student profile picture (Class Advisor only)
+// @route   DELETE /api/faculty/student-profile-picture/:studentId
+// @access  Faculty and above (Class Advisor only)
+router.delete('/student-profile-picture/:studentId', authenticate, facultyAndAbove, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const currentUser = req.user;
+    
+    console.log('🗑️ Student profile picture removal request received');
+    console.log('👨‍🎓 Student ID:', studentId);
+
+    // Find the student
+    const student = await Student.findById(studentId).populate('userId', 'name email');
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        msg: 'Student not found'
+      });
+    }
+
+    // Check if current user is the class advisor for this student
+    // Convert semester from "Sem 7" format to number 7
+    const semesterNumber = typeof student.semester === 'string' && student.semester.startsWith('Sem ') 
+      ? parseInt(student.semester.replace('Sem ', '')) 
+      : student.semester;
+    
+    const classAssignment = await ClassAssignment.findOne({
+      facultyId: currentUser._id,
+      batch: student.batch,
+      year: student.year,
+      semester: semesterNumber,
+      section: student.section,
+      active: true
+    });
+
+    if (!classAssignment) {
+      return res.status(403).json({
+        success: false,
+        msg: 'Access denied. You are not the class advisor for this student.'
+      });
+    }
+
+    console.log('✅ Class advisor verification passed for student:', student.userId.name);
+
+    // Remove profile image
+    const updatedUser = await User.findByIdAndUpdate(
+      student.userId._id,
+      { profileImage: null },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        msg: 'Student user not found'
+      });
+    }
+
+    console.log('✅ Student profile image removed successfully:', {
+      studentId: student._id,
+      studentName: student.userId.name,
+      userId: updatedUser._id
+    });
+
+    res.json({
+      success: true,
+      msg: 'Student profile picture removed successfully',
+      data: {
+        studentId: student._id,
+        studentName: student.userId.name
+      }
+    });
+  } catch (error) {
+    console.error('Error removing student profile picture:', error);
     res.status(500).json({
       success: false,
       msg: 'Server error'
@@ -79,9 +415,9 @@ router.get('/test-auth', hodAndAbove, (req, res) => {
   });
 });
 
-// Generate batch ranges for the dropdown (2020-2030 with +4 years)
+// Generate batch ranges for the dropdown (2022-2030 with +4 years)
 const generateBatchRanges = () => {
-  const startYear = 2020;
+  const startYear = 2022;
   const endYear = 2030;
   const batches = [];
   
@@ -607,7 +943,7 @@ router.get('/:facultyId/dashboard', facultyAndAbove, async (req, res) => {
 // @access  Faculty and above (Class Advisor)
 router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
   try {
-    const { batch, year, semester, department } = req.query;
+    const { batch, year, semester, department, section } = req.query;
     const currentUser = req.user;
 
     console.log('🔍 Students request:', { batch, year, semester, department, userId: currentUser._id });
@@ -626,22 +962,54 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
       batch,
       year,
       semester: parseInt(semester),
-      section: 'A', // Default section for now
+      section: section || 'A', // Use provided section or default to 'A'
       active: true
     });
 
     // If not found in ClassAssignment, check Faculty model
     let faculty = null;
     if (!classAssignment) {
+      // Check if faculty is assigned to this specific class through assignedClasses array
       faculty = await Faculty.findOne({ 
-      userId: currentUser._id,
-      is_class_advisor: true,
-      batch,
-      year,
-      semester: parseInt(semester),
-      department,
-      status: 'active'
-    });
+        userId: currentUser._id,
+        'assignedClasses.batch': batch,
+        'assignedClasses.year': year,
+        'assignedClasses.semester': parseInt(semester),
+        'assignedClasses.section': section || 'A',
+        'assignedClasses.active': true,
+        department,
+        status: 'active'
+      });
+    }
+
+    // If still not found, check if faculty exists and has students in this class
+    if (!classAssignment && !faculty) {
+      console.log('⚠️ No formal assignment found, checking if faculty has students in this class...');
+      
+      // Check if there are any students in this class created by this faculty
+      const facultyRecord = await Faculty.findOne({
+        userId: currentUser._id,
+        department,
+        status: 'active'
+      });
+      
+      if (facultyRecord) {
+        // Check if there are students in this class
+        const studentsInClass = await Student.find({
+          batch,
+          year,
+          semester: `Sem ${semester}`,
+          section: section || 'A',
+          department,
+          facultyId: facultyRecord._id,
+          status: 'active'
+        }).limit(1);
+        
+        if (studentsInClass.length > 0) {
+          console.log('✅ Faculty has students in this class, allowing access');
+          faculty = facultyRecord;
+        }
+      }
     }
 
     if (!classAssignment && !faculty) {
@@ -662,7 +1030,7 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
     // Format: batch_year_semester_section (e.g., "2024-2028_1st Year_Sem 1_A")
     const normalizedYear = year; // Already in correct format from request
     const normalizedSemester = `Sem ${semester}`; // Convert to "Sem X" format
-    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_A`;
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section || 'A'}`;
     
     console.log('🔍 Querying students with classId:', classId);
     
@@ -671,7 +1039,7 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
       classId: classId,
       facultyId: facultyId, // Only show students created by this faculty
       status: 'active' // Exclude soft-deleted students
-    }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
+    }).populate('userId', 'name email mobile profileImage').sort({ rollNumber: 1 });
     
     // If no students found with classId, try without classId (backward compatibility)
     if (students.length === 0) {
@@ -683,18 +1051,38 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
         department,
         facultyId: facultyId, // Only show students created by this faculty
         status: 'active' // Exclude soft-deleted students
-      }).populate('userId', 'name email mobile').sort({ rollNumber: 1 });
+      }).populate('userId', 'name email mobile profileImage').sort({ rollNumber: 1 });
     }
 
     // If no students found in Student model, try User model
     if (students.length === 0) {
       console.log('📊 No students found in Student model, checking User model...');
+      
+      // Generate the class string format used in User model
+      // Format 1: "4th Year A" (new format from studentCreationService)
+      const yearNumber = year.includes('1st') ? '1st' : 
+                        year.includes('2nd') ? '2nd' : 
+                        year.includes('3rd') ? '3rd' : '4th';
+      const userClassString1 = `${yearNumber} Year ${section || 'A'}`; // Use provided section or default to A
+      
+      // Format 2: "batch, year, semester" (old format from student.js)
+      const userClassString2 = `${batch}, ${year}, Sem ${semester}`;
+      
+      console.log('🔍 Searching User model with class formats:', { userClassString1, userClassString2 });
+      
       const userStudents = await User.find({
         role: 'student',
         department,
+        $or: [
+          { class: userClassString1 }, // New format
+          { class: userClassString2 }   // Old format
+        ],
         createdBy: currentUser._id, // Only show students created by this faculty
         status: 'active'
-      }).select('name email phone').sort({ name: 1 });
+      }).select('name email phone profileImage class').sort({ name: 1 });
+
+      console.log('📊 Found user students:', userStudents.length);
+      console.log('📊 User students class formats:', userStudents.map(u => ({ name: u.name, class: u.class })));
 
       // Convert User records to Student-like format
       students = userStudents.map((user, index) => ({
@@ -703,7 +1091,14 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
         name: user.name,
         email: user.email,
         mobile: user.phone || 'N/A',
-        userId: user._id
+        userId: user._id,
+        profileImage: user.profileImage,
+        classId: classId, // Add the classId that was generated earlier
+        facultyId: facultyId, // Add the facultyId
+        batch: batch,
+        year: year,
+        semester: `Sem ${semester}`,
+        section: section || 'A'
       }));
     }
 
@@ -922,12 +1317,12 @@ router.delete('/:id', hodAndAbove, async (req, res) => {
 // @desc    Create student for class advisor
 // @route   POST /api/faculty/students
 // @access  Faculty and above (Class Advisor)
-router.post('/students', facultyAndAbove, [
+router.post('/students', authenticate, facultyAndAbove, [
   body('rollNumber').trim().isLength({ min: 1 }).withMessage('Roll number is required'),
   body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('mobile').matches(/^[0-9]{10}$/).withMessage('Mobile number must be exactly 10 digits'),
-  body('parentContact').matches(/^[0-9]{10}$/).withMessage('Parent contact must be exactly 10 digits'),
+  body('parentContact').optional().matches(/^[0-9]{10}$/).withMessage('Parent contact must be exactly 10 digits'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('batch').matches(/^\d{4}-\d{4}$/).withMessage('Batch must be in format YYYY-YYYY'),
   body('year').isIn(['1st Year', '2nd Year', '3rd Year', '4th Year']).withMessage('Invalid year'),
@@ -1025,12 +1420,14 @@ router.put('/students/:id', authenticate, facultyAndAbove, [
       });
     }
 
-    // Check if faculty is class advisor for this student's batch/year
+    // Check if faculty is class advisor for this student's batch/year/semester/section
     const faculty = await Faculty.findOne({ 
       userId: currentUser._id,
-      is_class_advisor: true,
-      batch: student.batch,
-      year: student.year,
+      'assignedClasses.batch': student.batch,
+      'assignedClasses.year': student.year,
+      'assignedClasses.semester': semesterNumber,
+      'assignedClasses.section': student.section || 'A',
+      'assignedClasses.active': true,
       status: 'active'
     });
 
@@ -1151,12 +1548,18 @@ router.delete('/students/:id', authenticate, facultyAndAbove, async (req, res) =
       });
     }
 
-    // Check if faculty is class advisor for this student's batch/year
+    // Check if faculty is class advisor for this student's batch/year/semester/section
+    const semesterNumber = typeof student.semester === 'string' && student.semester.startsWith('Sem ') 
+      ? parseInt(student.semester.replace('Sem ', '')) 
+      : student.semester;
+    
     const faculty = await Faculty.findOne({ 
       userId: currentUser._id,
-      is_class_advisor: true,
-      batch: student.batch,
-      year: student.year,
+      'assignedClasses.batch': student.batch,
+      'assignedClasses.year': student.year,
+      'assignedClasses.semester': semesterNumber,
+      'assignedClasses.section': student.section || 'A',
+      'assignedClasses.active': true,
       status: 'active'
     });
 
@@ -1204,12 +1607,18 @@ router.delete('/delete-student/:id', authenticate, facultyAndAbove, async (req, 
       });
     }
 
-    // Check if faculty is class advisor for this student's batch/year
+    // Check if faculty is class advisor for this student's batch/year/semester/section
+    const semesterNumber = typeof student.semester === 'string' && student.semester.startsWith('Sem ') 
+      ? parseInt(student.semester.replace('Sem ', '')) 
+      : student.semester;
+    
     const faculty = await Faculty.findOne({ 
       userId: currentUser._id,
-      is_class_advisor: true,
-      batch: student.batch,
-      year: student.year,
+      'assignedClasses.batch': student.batch,
+      'assignedClasses.year': student.year,
+      'assignedClasses.semester': semesterNumber,
+      'assignedClasses.section': student.section || 'A',
+      'assignedClasses.active': true,
       status: 'active'
     });
 
@@ -1436,7 +1845,8 @@ router.post('/:id/assign-class', hodAndAbove, [
       });
     }
 
-    // Check if another faculty is already assigned to this class
+    // Check if another faculty is already assigned to this specific class
+    // (This prevents multiple faculty per class, but allows one faculty to have multiple classes)
     const existingFaculty = await Faculty.findOne({
       _id: { $ne: id },
       department: currentUser.department,
@@ -1456,6 +1866,23 @@ router.post('/:id/assign-class', hodAndAbove, [
           name: existingFaculty.name,
           email: existingFaculty.email
         }
+      });
+    }
+
+    // Check if this faculty is already assigned to this specific class
+    const facultyAlreadyAssigned = await Faculty.findOne({
+      _id: id,
+      'assignedClasses.batch': batch,
+      'assignedClasses.year': year,
+      'assignedClasses.semester': semester,
+      'assignedClasses.section': section,
+      'assignedClasses.active': true
+    });
+
+    if (facultyAlreadyAssigned) {
+      return res.status(400).json({
+        status: 'error',
+        message: `This faculty is already assigned as class advisor for ${year} | Semester ${semester} | Section ${section}`
       });
     }
 

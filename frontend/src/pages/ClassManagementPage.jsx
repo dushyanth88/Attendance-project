@@ -11,6 +11,9 @@ const ClassManagementPage = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [facultyProfile, setFacultyProfile] = useState(null);
+  const [profileImage, setProfileImage] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
 
   // Fetch faculty profile and assigned classes
   useEffect(() => {
@@ -33,7 +36,9 @@ const ClassManagementPage = () => {
         
         if (profileResponse.data.success) {
           setFacultyProfile(profileResponse.data.data);
+          setProfileImage(profileResponse.data.data.profileImage);
           console.log('✅ Faculty profile loaded:', profileResponse.data.data);
+          console.log('🖼️ Profile image loaded:', profileResponse.data.data.profileImage);
         }
       } catch (profileError) {
         console.warn('⚠️ Could not fetch faculty profile, using user data:', profileError);
@@ -44,6 +49,8 @@ const ClassManagementPage = () => {
           department: user.department,
           is_class_advisor: true // Assume true for class management access
         });
+        console.log('🖼️ Profile image in fallback:', user.profileImage);
+        setProfileImage(user.profileImage);
       }
 
       // Fetch assigned classes using the correct user ID
@@ -94,6 +101,84 @@ const ClassManagementPage = () => {
     navigate(`/faculty/class/${classId}`);
   };
 
+  const handleProfilePictureUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setToast({ show: true, message: 'Please select a valid image file (JPEG, PNG, GIF, WebP)', type: 'error' });
+      return;
+    }
+
+    // Validate file size (2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setToast({ show: true, message: 'Image size must be less than 2MB', type: 'error' });
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      
+      const formData = new FormData();
+      formData.append('profilePicture', file);
+
+      const response = await apiFetch({
+        url: '/api/faculty/profile-picture',
+        method: 'POST',
+        data: formData
+        // Don't set Content-Type header - let the browser set it with boundary
+      });
+
+      if (response.data.success) {
+        setProfileImage(response.data.data.profileImage);
+        setToast({ show: true, message: 'Profile picture uploaded successfully!', type: 'success' });
+      } else {
+        setToast({ show: true, message: response.data.msg || 'Failed to upload profile picture', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Error uploading profile picture:', error);
+      setToast({ show: true, message: 'Failed to upload profile picture', type: 'error' });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleRemoveProfilePicture = async () => {
+    try {
+      setUploadingImage(true);
+      
+      const response = await apiFetch({
+        url: '/api/faculty/profile-picture',
+        method: 'DELETE'
+      });
+
+      if (response.data.success) {
+        setProfileImage(null);
+        setToast({ show: true, message: 'Profile picture removed successfully!', type: 'success' });
+      } else {
+        setToast({ show: true, message: response.data.msg || 'Failed to remove profile picture', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Error removing profile picture:', error);
+      setToast({ show: true, message: 'Failed to remove profile picture', type: 'error' });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleProfilePictureClick = (e) => {
+    e.stopPropagation();
+    console.log('🖼️ Profile picture clicked, profileImage:', profileImage);
+    if (profileImage) {
+      console.log('🖼️ Opening image modal');
+      setShowImageModal(true);
+    } else {
+      console.log('🖼️ No profile image to enlarge');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -111,11 +196,58 @@ const ClassManagementPage = () => {
             {/* Faculty Details - Left Side */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                  <span className="text-white font-semibold text-lg">
-                    {facultyProfile?.name?.charAt(0) || user?.name?.charAt(0) || 'F'}
-                  </span>
+                {/* Profile Picture */}
+                <div className="relative group">
+                  <div 
+                    className="w-12 h-12 rounded-full overflow-hidden bg-blue-600 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-blue-300 transition-all duration-200"
+                    onClick={handleProfilePictureClick}
+                  >
+                    {profileImage ? (
+                      <img 
+                        src={profileImage} 
+                        alt="Profile" 
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center">
+                        <svg className="w-6 h-6 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <span className="text-white text-xs font-medium">Add</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Upload/Remove Overlay */}
+                  <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
+                    <div className="flex flex-col items-center space-y-1 pointer-events-auto">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleProfilePictureUpload}
+                        className="hidden"
+                        id="profile-picture-upload"
+                        disabled={uploadingImage}
+                      />
+                      <label
+                        htmlFor="profile-picture-upload"
+                        className="text-white text-xs cursor-pointer hover:text-blue-200 transition-colors"
+                      >
+                        {uploadingImage ? '⏳' : (profileImage ? '📷' : '➕')}
+                      </label>
+                      {profileImage && (
+                        <button
+                          onClick={handleRemoveProfilePicture}
+                          className="text-white text-xs hover:text-red-200 transition-colors"
+                          disabled={uploadingImage}
+                        >
+                          🗑️
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
+                
                 <div>
                   <h4 className="text-lg font-semibold text-gray-900">
                     {facultyProfile?.name || user?.name || 'Faculty'}
@@ -245,6 +377,42 @@ const ClassManagementPage = () => {
           </div>
         </div>
       </main>
+
+      {/* Profile Image Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" onClick={() => {
+          console.log('🖼️ Modal background clicked, closing modal');
+          setShowImageModal(false);
+        }}>
+          <div className="relative max-w-4xl max-h-[90vh] p-4">
+            <button
+              onClick={() => {
+                console.log('🖼️ Close button clicked');
+                setShowImageModal(false);
+              }}
+              className="absolute top-2 right-2 text-white hover:text-gray-300 transition-colors z-10"
+            >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={profileImage}
+              alt="Profile Picture"
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              onClick={(e) => {
+                console.log('🖼️ Image clicked, preventing close');
+                e.stopPropagation();
+              }}
+            />
+            <div className="absolute bottom-4 left-4 right-4 text-center">
+              <p className="text-white text-sm bg-black bg-opacity-50 rounded-lg px-4 py-2">
+                {facultyProfile?.name || user?.name || 'Faculty'} - Profile Picture
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notifications */}
       {toast.show && (

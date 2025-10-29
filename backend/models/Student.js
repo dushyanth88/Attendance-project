@@ -35,8 +35,8 @@ const studentSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Class assignment is required'],
     enum: {
-      values: ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '4B'],
-      message: 'Class must be one of: 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B'
+      values: ['1A', '1B', '1C', '2A', '2B', '2C', '3A', '3B', '3C', '4A', '4B', '4C'],
+      message: 'Class must be one of: 1A, 1B, 1C, 2A, 2B, 2C, 3A, 3B, 3C, 4A, 4B, 4C'
     }
   },
   year: {
@@ -60,6 +60,15 @@ const studentSchema = new mongoose.Schema({
       values: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sem 5', 'Sem 6', 'Sem 7', 'Sem 8'],
       message: 'Semester must be one of: Sem 1 ... Sem 8'
     }
+  },
+  section: {
+    type: String,
+    required: [true, 'Section is required'],
+    enum: {
+      values: ['A', 'B', 'C'],
+      message: 'Section must be one of: A, B, C'
+    },
+    default: 'A'
   },
   facultyId: {
     type: mongoose.Schema.Types.ObjectId,

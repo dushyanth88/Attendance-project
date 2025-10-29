@@ -2,13 +2,14 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import User from '../models/User.js';
 import Faculty from '../models/Faculty.js';
+import Student from '../models/Student.js';
 import { authenticate, adminOnly, hodAndAbove, facultyAndAbove } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Generate batch ranges for the dropdown (2020-2030 with +4 years)
+// Generate batch ranges for the dropdown (2022-2030 with +4 years)
 const generateBatchRanges = () => {
-  const startYear = 2020;
+  const startYear = 2022;
   const endYear = 2030;
   const batches = [];
   
@@ -22,6 +23,336 @@ const generateBatchRanges = () => {
 
 // All admin routes require authentication and admin role (except some shared endpoints)
 router.use(authenticate);
+
+// @desc    Get department statistics
+// @route   GET /api/admin/department-stats
+// @access  HOD and above
+router.get('/department-stats', hodAndAbove, async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const department = currentUser.department;
+
+    console.log('📊 Fetching department statistics for:', department);
+    console.log('📊 Current user:', {
+      id: currentUser._id,
+      name: currentUser.name,
+      role: currentUser.role,
+      department: currentUser.department
+    });
+
+    // First, let's check what students exist in the database
+    const allStudents = await Student.find({}).limit(5);
+    console.log('📊 Sample students in database:', allStudents.map(s => ({
+      id: s._id,
+      name: s.name,
+      department: s.department,
+      status: s.status
+    })));
+
+    // Get total number of students in the department (without status filter first)
+    const totalStudentsNoFilter = await Student.countDocuments({
+      department: department
+    });
+
+    // Get total number of students in the department (with status filter)
+    const totalStudents = await Student.countDocuments({
+      department: department,
+      status: 'active'
+    });
+
+    // Also try without status filter if no results
+    const totalStudentsFinal = totalStudents > 0 ? totalStudents : totalStudentsNoFilter;
+
+    console.log('📊 Student counts:', {
+      department,
+      totalStudentsNoFilter,
+      totalStudents,
+      totalStudentsFinal
+    });
+
+    // Check what faculty exist in the database
+    const allFaculty = await Faculty.find({}).limit(5);
+    console.log('📊 Sample faculty in database:', allFaculty.map(f => ({
+      id: f._id,
+      name: f.name,
+      department: f.department,
+      status: f.status
+    })));
+
+    // Get total number of faculty members in the department (without status filter first)
+    const totalFacultyNoFilter = await Faculty.countDocuments({
+      department: department
+    });
+
+    // Get total number of faculty members in the department (with status filter)
+    const totalFaculty = await Faculty.countDocuments({
+      department: department,
+      status: 'active'
+    });
+
+    // Get faculty count from User model as well (for users with faculty role)
+    const facultyUsersNoFilter = await User.countDocuments({
+      role: 'faculty',
+      department: department
+    });
+
+    const facultyUsers = await User.countDocuments({
+      role: 'faculty',
+      department: department,
+      status: 'active'
+    });
+
+    // Use unfiltered counts if filtered counts are 0
+    const totalFacultyFinal = totalFaculty > 0 ? totalFaculty : totalFacultyNoFilter;
+    const facultyUsersFinal = facultyUsers > 0 ? facultyUsers : facultyUsersNoFilter;
+
+    console.log('📊 Faculty counts:', {
+      department,
+      totalFacultyNoFilter,
+      totalFaculty,
+      totalFacultyFinal,
+      facultyUsersNoFilter,
+      facultyUsers,
+      facultyUsersFinal
+    });
+
+    // Use the higher count between Faculty model and User model
+    const actualFacultyCount = Math.max(totalFacultyFinal, facultyUsersFinal);
+
+    console.log('📊 Final department statistics:', {
+      department,
+      totalStudentsFinal,
+      totalFacultyFinal,
+      facultyUsersFinal,
+      actualFacultyCount
+    });
+
+    res.json({
+      success: true,
+      data: {
+        department: department,
+        totalStudents: totalStudentsFinal,
+        totalFaculty: actualFacultyCount,
+        debug: {
+          totalStudentsNoFilter,
+          totalFacultyNoFilter,
+          facultyUsersNoFilter,
+          totalStudents,
+          totalFaculty,
+          facultyUsers
+        },
+        lastUpdated: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching department statistics:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Failed to fetch department statistics'
+    });
+  }
+});
+
+// @desc    Get daily department attendance percentage
+// @route   GET /api/admin/daily-attendance
+// @access  HOD and above
+router.get('/daily-attendance', hodAndAbove, async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const department = currentUser.department;
+
+    console.log('📊 Fetching daily attendance for department:', department);
+
+    // Import Attendance model
+    const Attendance = (await import('../models/Attendance.js')).default;
+
+    // Debug: Check all students in department first
+    const allDepartmentStudents = await Student.find({ department: department });
+    console.log('📊 All students in department:', allDepartmentStudents.length);
+    console.log('📊 Sample students:', allDepartmentStudents.slice(0, 3).map(s => ({
+      id: s._id,
+      name: s.name,
+      department: s.department,
+      createdBy: s.createdBy,
+      status: s.status
+    })));
+
+    // Get all faculty members in the department
+    const departmentFaculty = await Faculty.find({
+      department: department,
+      status: 'active'
+    });
+
+    // If no active faculty, try without status filter
+    const facultyToUse = departmentFaculty.length > 0 ? departmentFaculty : 
+      await Faculty.find({ department: department });
+
+    if (facultyToUse.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          department: department,
+          attendancePercentage: 0,
+          totalStudents: 0,
+          presentStudents: 0,
+          absentStudents: 0,
+          notMarkedStudents: 0,
+          date: new Date().toISOString().split('T')[0],
+          lastUpdated: new Date().toISOString()
+        }
+      });
+    }
+
+    // Get faculty IDs from both Faculty model and User model
+    const facultyIds = facultyToUse.map(faculty => faculty._id);
+    
+    // Also get faculty users from User model
+    const facultyUsers = await User.find({
+      role: 'faculty',
+      department: department
+    });
+    const facultyUserIds = facultyUsers.map(user => user._id);
+    
+    // Combine both faculty IDs
+    const allFacultyIds = [...facultyIds, ...facultyUserIds];
+    
+    console.log('📊 Faculty IDs from Faculty model:', facultyIds);
+    console.log('📊 Faculty IDs from User model:', facultyUserIds);
+    console.log('📊 Combined faculty IDs:', allFacultyIds);
+
+    // Get students created by faculty members in this department
+    const departmentStudents = await Student.find({
+      department: department,
+      createdBy: { $in: allFacultyIds },
+      status: 'active'
+    }).populate('userId', '_id');
+
+    console.log('📊 Students created by department faculty (active):', departmentStudents.length);
+
+    // If no active students, try without status filter
+    let studentsToUse = departmentStudents.length > 0 ? departmentStudents : 
+      await Student.find({ 
+        department: department,
+        createdBy: { $in: allFacultyIds }
+      }).populate('userId', '_id');
+
+    console.log('📊 Final students to use:', studentsToUse.length);
+    console.log('📊 Sample students to use:', studentsToUse.slice(0, 3).map(s => ({
+      id: s._id,
+      name: s.name,
+      createdBy: s.createdBy,
+      userId: s.userId._id
+    })));
+
+    // If no students created by faculty, fallback to all students in department
+    if (studentsToUse.length === 0) {
+      console.log('📊 No students created by faculty, falling back to all department students');
+      const fallbackStudents = await Student.find({ 
+        department: department,
+        status: 'active'
+      }).populate('userId', '_id');
+      
+      if (fallbackStudents.length === 0) {
+        const allStudentsFallback = await Student.find({ 
+          department: department
+        }).populate('userId', '_id');
+        
+        if (allStudentsFallback.length === 0) {
+          return res.json({
+            success: true,
+            data: {
+              department: department,
+              attendancePercentage: 0,
+              totalStudents: 0,
+              presentStudents: 0,
+              absentStudents: 0,
+              notMarkedStudents: 0,
+              date: new Date().toISOString().split('T')[0],
+              lastUpdated: new Date().toISOString(),
+              debug: 'No students found in department'
+            }
+          });
+        }
+        
+        studentsToUse = allStudentsFallback;
+        console.log('📊 Using all students in department (no status filter):', studentsToUse.length);
+      } else {
+        studentsToUse = fallbackStudents;
+        console.log('📊 Using all active students in department:', studentsToUse.length);
+      }
+    }
+
+    // Get today's attendance records for department students
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayAttendanceRecords = await Attendance.find({
+      studentId: { $in: studentsToUse.map(student => student.userId._id) },
+      date: {
+        $gte: today,
+        $lt: tomorrow
+      }
+    });
+
+    console.log('📊 Today\'s attendance records found:', todayAttendanceRecords.length);
+    console.log('📊 Sample attendance records:', todayAttendanceRecords.slice(0, 3).map(r => ({
+      studentId: r.studentId,
+      status: r.status,
+      date: r.date
+    })));
+
+    // Calculate today's attendance statistics
+    const presentCount = todayAttendanceRecords.filter(r => r.status === 'Present').length;
+    const absentCount = todayAttendanceRecords.filter(r => r.status === 'Absent').length;
+    const notMarkedCount = studentsToUse.length - (presentCount + absentCount);
+
+    console.log('📊 Attendance breakdown:', {
+      presentCount,
+      absentCount,
+      notMarkedCount,
+      totalStudents: studentsToUse.length
+    });
+    
+    // Calculate attendance percentage based on total students
+    const attendancePercentage = studentsToUse.length > 0 
+      ? Math.round((presentCount / studentsToUse.length) * 100) 
+      : 0;
+
+    console.log('📊 Daily attendance calculation:', {
+      department,
+      totalFaculty: facultyToUse.length,
+      totalStudents: studentsToUse.length,
+      presentStudents: presentCount,
+      absentStudents: absentCount,
+      notMarkedStudents: notMarkedCount,
+      attendancePercentage: attendancePercentage
+    });
+
+    res.json({
+      success: true,
+      data: {
+        department: department,
+        attendancePercentage: attendancePercentage,
+        totalStudents: studentsToUse.length,
+        presentStudents: presentCount,
+        absentStudents: absentCount,
+        notMarkedStudents: notMarkedCount,
+        date: new Date().toISOString().split('T')[0],
+        lastUpdated: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching daily attendance:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Failed to fetch daily attendance'
+    });
+  }
+});
 
 // @desc    Get available batch ranges (shared with HOD)
 // @route   GET /api/admin/batch-ranges
