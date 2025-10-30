@@ -130,35 +130,38 @@ const FacultyDashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading faculty dashboard...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Fixed Navbar */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white shadow-sm border-b">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center h-20">
             {/* Faculty Details - Left Side */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                  <span className="text-white font-semibold text-lg">
+                <div className="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                  <span className="text-white font-semibold text-xl">
                     {faculty?.name?.charAt(0) || 'F'}
                   </span>
                 </div>
                 <div>
-                  <h4 className="text-lg font-semibold text-gray-900">
+                  <h4 className="text-xl font-bold text-white">
                     {faculty?.name || 'Faculty'}
                   </h4>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-white text-opacity-90">
                     {faculty?.department || user?.department}
                   </p>
                   {faculty?.email && (
-                    <small className="text-xs text-gray-500">
+                    <small className="text-xs text-white text-opacity-80">
                       {faculty.email}
                     </small>
                   )}
@@ -169,7 +172,7 @@ const FacultyDashboard = () => {
             {/* Logout Button - Right Side */}
             <button
               onClick={handleLogout}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
             >
               Logout
             </button>
@@ -178,40 +181,56 @@ const FacultyDashboard = () => {
       </nav>
 
       {/* Main Content */}
-      <main className="pt-20">
+      <main className="pt-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">Faculty Dashboard</h1>
-            <p className="mt-2 text-gray-600">
-              Manage your assigned classes and student data
-            </p>
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 shadow-xl">
+              <div className="flex items-center">
+                <div className="bg-white bg-opacity-20 p-3 rounded-xl mr-4">
+                  <span className="text-3xl">👨‍🏫</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-white">Faculty Dashboard</h1>
+                  <p className="mt-2 text-white text-opacity-90">
+                    Manage your assigned classes and student data
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Assigned Classes Section */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Assigned Classes</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Click "Manage" to access attendance, reports, and student data for each class
-              </p>
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100">
+            <div className="px-6 py-6 border-b border-blue-200">
+              <div className="flex items-center">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-4 shadow-lg">
+                  <span className="text-2xl">📚</span>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Assigned Classes</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Click "Manage" to access attendance, reports, and student data for each class
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="p-6">
               {assignedClasses.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {assignedClasses.map((cls, index) => (
-                    <div key={cls.classId || index} className="bg-gray-50 rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                    <div key={cls.classId || index} className="bg-gradient-to-br from-white to-purple-50 rounded-2xl border border-purple-100 p-6 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                          <h3 className="text-lg font-bold text-gray-800 mb-2">
                             {cls.batch} | {cls.year} | Semester {cls.semester} | Section {cls.section}
                           </h3>
                           
                           <div className="space-y-2 text-sm text-gray-600">
                             <div className="flex items-center">
                               <span className="font-medium mr-2">Batch:</span>
-                              <span className="text-blue-600 font-semibold">{cls.batch}</span>
+                              <span className="text-purple-600 font-semibold">{cls.batch}</span>
                             </div>
                             <div className="flex items-center">
                               <span className="font-medium mr-2">Year:</span>
@@ -236,7 +255,7 @@ const FacultyDashboard = () => {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg">
                           Active
                         </span>
                       </div>
@@ -248,13 +267,13 @@ const FacultyDashboard = () => {
                         <div className="flex space-x-2">
                           <button
                             onClick={() => toggleClassExpansion(cls.classId)}
-                            className="bg-gray-600 text-white px-3 py-2 rounded-md hover:bg-gray-700 transition-colors text-sm font-medium"
+                            className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-4 py-2 rounded-xl hover:from-purple-600 hover:to-indigo-700 transition-all duration-200 text-sm font-medium shadow-lg"
                           >
                             {expandedClasses.has(cls.classId) ? '📋 Hide Students' : '👥 View Students'}
                           </button>
                           <button
                             onClick={() => handleManageClass(cls.classId)}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                            className="bg-gradient-to-r from-blue-500 to-cyan-600 text-white px-4 py-2 rounded-xl hover:from-blue-600 hover:to-cyan-700 transition-all duration-200 text-sm font-medium shadow-lg"
                           >
                             Manage Class
                           </button>
@@ -294,10 +313,10 @@ const FacultyDashboard = () => {
                             {studentAttendance[cls.classId] ? (
                               <div className="space-y-2">
                                 {studentAttendance[cls.classId].map((student, index) => (
-                                  <div key={student._id || student.id || index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                                  <div key={student._id || student.id || index} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-200">
                                     <div className="flex items-center space-x-3">
-                                      <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                                        <span className="text-xs font-medium text-gray-600">
+                                      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-lg">
+                                        <span className="text-xs font-medium text-white">
                                           {student.name?.charAt(0) || 'S'}
                                         </span>
                                       </div>
@@ -306,10 +325,10 @@ const FacultyDashboard = () => {
                                         <p className="text-xs text-gray-500">Roll: {student.rollNumber}</p>
                                       </div>
                                     </div>
-                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                      student.attendanceStatus === 'Present' ? 'bg-green-100 text-green-800' :
-                                      student.attendanceStatus === 'Absent' ? 'bg-red-100 text-red-800' :
-                                      'bg-yellow-100 text-yellow-800'
+                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm ${
+                                      student.attendanceStatus === 'Present' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white' :
+                                      student.attendanceStatus === 'Absent' ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white' :
+                                      'bg-gradient-to-r from-yellow-500 to-orange-500 text-white'
                                     }`}>
                                       {student.attendanceStatus === 'Present' ? '✅ Present' :
                                        student.attendanceStatus === 'Absent' ? '❌ Absent' :
@@ -332,15 +351,19 @@ const FacultyDashboard = () => {
                 </div>
               ) : (
                 <div className="text-center py-12">
-                  <div className="text-gray-500 mb-4">
-                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
+                  <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl p-8 shadow-lg border border-gray-100">
+                    <div className="text-gray-500 mb-4">
+                      <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center">
+                        <svg className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      </div>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2">No Assigned Classes</h3>
+                    <p className="text-gray-600">
+                      You don't have any classes assigned yet. Contact your HOD for class assignments.
+                    </p>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Assigned Classes</h3>
-                  <p className="text-gray-500">
-                    You don't have any classes assigned yet. Contact your HOD for class assignments.
-                  </p>
                 </div>
               )}
             </div>

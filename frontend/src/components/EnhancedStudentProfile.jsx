@@ -279,11 +279,19 @@ const EnhancedStudentProfile = () => {
           <div className="lg:col-span-1">
             <div className="bg-white rounded-lg shadow-md p-6">
               <div className="text-center mb-6">
-                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl font-bold text-blue-600">
-                    {student?.name?.charAt(0)?.toUpperCase() || 'S'}
-                  </span>
-                </div>
+                {student?.profileImage ? (
+                  <img
+                    src={student.profileImage}
+                    alt={student?.name || 'Profile'}
+                    className="w-20 h-20 rounded-full object-cover mx-auto mb-4 border border-gray-200"
+                  />
+                ) : (
+                  <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span className="text-2xl font-bold text-blue-600">
+                      {student?.name?.charAt(0)?.toUpperCase() || 'S'}
+                    </span>
+                  </div>
+                )}
                 <h2 className="text-xl font-bold text-gray-900">{student?.name || 'Unknown'}</h2>
                 <p className="text-gray-600">Roll No: {student?.rollNo || 'N/A'}</p>
               </div>

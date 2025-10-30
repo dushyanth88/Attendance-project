@@ -128,15 +128,15 @@ const AttendanceHistory = () => {
         </div>
 
         {/* Date Selector */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Select Date
+        <div className="bg-gradient-to-br from-white to-purple-50 rounded-2xl shadow-lg border border-purple-100 p-6 mb-6">
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            📅 Select Date
           </label>
           <input
             type="date"
             value={historyDate}
             onChange={handleDateChange}
-            className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full max-w-xs px-4 py-3 border border-purple-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 shadow-sm"
           />
         </div>
 

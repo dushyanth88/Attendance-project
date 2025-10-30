@@ -1214,8 +1214,9 @@ router.get('/:id', authenticate, async (req, res) => {
     const currentUser = req.user;
 
     const student = await Student.findById(id)
-      .select('rollNumber name department mobile semester year email classAssigned')
-      .populate('facultyId', 'name');
+      .select('userId rollNumber name department mobile semester year email classAssigned')
+      .populate('facultyId', 'name')
+      .populate('userId', 'profileImage');
 
     if (!student) {
       return res.status(404).json({
@@ -1249,7 +1250,8 @@ router.get('/:id', authenticate, async (req, res) => {
       semester: student.semester,
       email: student.email,
       classAssigned: student.classAssigned,
-      facultyName: student.facultyId?.name || 'N/A'
+      facultyName: student.facultyId?.name || 'N/A',
+      profileImage: student.userId?.profileImage || null
     };
 
     res.status(200).json(studentProfile);
@@ -1398,14 +1400,14 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     // Get student basic info - try both Student document ID and User document ID
     console.log('🔍 Trying to find student by Student ID:', id);
     let student = await Student.findById(id)
-      .populate('userId', 'name email mobile')
+      .populate('userId', 'name email mobile profileImage')
       .populate('facultyId', 'name');
 
     // If not found by Student ID, try by User ID
     if (!student) {
       console.log('🔍 Student not found by ID, trying by User ID:', id);
       student = await Student.findOne({ userId: id })
-        .populate('userId', 'name email mobile')
+        .populate('userId', 'name email mobile profileImage')
         .populate('facultyId', 'name');
     }
 
@@ -1460,8 +1462,19 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     const holidays = await Holiday.find({
       department: student.department,
       holidayDate: holidayDateFilter,
-      isActive: true
+      isDeleted: false
     }).select('holidayDate reason');
+
+    console.log('🎉 Holidays fetched for student profile:', {
+      department: student.department,
+      dateFilter: holidayDateFilter,
+      holidayCount: holidays.length,
+      holidays: holidays.map(h => ({
+        date: h.holidayDate,
+        reason: h.reason,
+        isDeleted: h.isDeleted
+      }))
+    });
 
     // Create a set of holiday dates for quick lookup
     const holidayDates = new Set(holidays.map(h => 
@@ -1532,13 +1545,15 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           name: student.userId.name,
           email: student.userId.email,
           mobile: student.mobile || student.userId.mobile || 'N/A',
+          parentContact: student.parentContact || 'N/A',
           department: student.department,
           year: student.year,
           semester: student.semester,
           section: student.section,
           batch: student.batch,
           classAssigned: student.classAssigned,
-          facultyName: student.facultyId?.name || 'Not assigned'
+          facultyName: student.facultyId?.name || 'Not assigned',
+          profileImage: student.userId?.profileImage || null
         },
         // Attendance statistics
         attendanceStats: {
@@ -1546,7 +1561,8 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           presentDays,
           absentDays,
           notMarkedDays,
-          attendancePercentage
+          attendancePercentage,
+          holidayCount: holidays.length
         },
         // Monthly attendance data for calendar
         monthlyAttendance,

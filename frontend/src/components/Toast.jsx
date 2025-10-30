@@ -20,28 +20,28 @@ const Toast = ({ message, type = 'success', onClose, duration = 3000 }) => {
   const getToastStyles = () => {
     switch (type) {
       case 'success':
-        return 'bg-green-500 text-white';
+        return 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg';
       case 'error':
-        return 'bg-red-500 text-white';
+        return 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg';
       case 'warning':
-        return 'bg-yellow-500 text-black';
+        return 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-lg';
       case 'info':
-        return 'bg-blue-500 text-white';
+        return 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg';
       default:
-        return 'bg-gray-500 text-white';
+        return 'bg-gradient-to-r from-gray-500 to-gray-600 text-white shadow-lg';
     }
   };
 
   const getIcon = () => {
     switch (type) {
       case 'success':
-        return '✓';
+        return '✅';
       case 'error':
-        return '✕';
+        return '❌';
       case 'warning':
-        return '⚠';
+        return '⚠️';
       case 'info':
-        return 'ℹ';
+        return 'ℹ️';
       default:
         return '•';
     }
@@ -53,7 +53,7 @@ const Toast = ({ message, type = 'success', onClose, duration = 3000 }) => {
     <div className={`fixed top-16 right-2 sm:top-20 sm:right-4 z-[9999] transform transition-all duration-300 ${
       isVisible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
     }`}>
-      <div className={`${getToastStyles()} px-4 sm:px-6 py-3 sm:py-4 rounded-lg shadow-lg flex items-center space-x-2 sm:space-x-3 min-w-72 sm:min-w-80 max-w-sm sm:max-w-md`}>
+      <div className={`${getToastStyles()} px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-xl flex items-center space-x-2 sm:space-x-3 min-w-72 sm:min-w-80 max-w-sm sm:max-w-md border border-white border-opacity-20 backdrop-blur-sm`}>
         <span className="text-lg sm:text-xl font-bold flex-shrink-0">{getIcon()}</span>
         <span className="flex-1 text-sm sm:text-base break-words">{message}</span>
         <button

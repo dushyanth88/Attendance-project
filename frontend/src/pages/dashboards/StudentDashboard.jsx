@@ -21,6 +21,7 @@ const StudentDashboard = () => {
   const [selectedDate, setSelectedDate] = useState('');
   const [reportSelectedDate, setReportSelectedDate] = useState('');
   const [profileImage, setProfileImage] = useState(user?.profileImage);
+  const [holidays, setHolidays] = useState([]);
 
   const handleReasonSubmit = (record) => {
     setSelectedRecord({
@@ -185,6 +186,30 @@ const StudentDashboard = () => {
     fetchAttendance();
   }, [user]);
 
+  // Fetch holidays
+  useEffect(() => {
+    const fetchHolidays = async () => {
+      try {
+        const res = await fetch('/api/holidays/student', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok && data.status === 'success') {
+          setHolidays(data.data || []);
+          console.log('🎉 Holidays fetched:', data.data);
+        }
+      } catch (e) {
+        console.error('❌ Error fetching holidays:', e);
+      }
+    };
+    
+    if (user?.role === 'student') {
+      fetchHolidays();
+    }
+  }, [user]);
+
   // Real-time updates via SSE
   useEffect(() => {
     if (!user?.id || !localStorage.getItem('accessToken')) return;
@@ -239,11 +264,11 @@ const StudentDashboard = () => {
   }, [user?.id]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Sticky Header */}
-      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+          <div className="flex justify-between items-center py-6">
             <div className="flex items-center">
               {/* Profile Picture */}
               <div className="relative mr-4">
@@ -251,7 +276,7 @@ const StudentDashboard = () => {
                   <img
                     src={profileImage}
                     alt={`${user.name}'s profile`}
-                    className="w-12 h-12 rounded-full object-cover border-2 border-gray-200"
+                    className="w-12 h-12 rounded-full object-cover border-2 border-white border-opacity-30"
                     onError={(e) => {
                       e.target.style.display = 'none';
                       e.target.nextSibling.style.display = 'flex';
@@ -259,21 +284,23 @@ const StudentDashboard = () => {
                   />
                 ) : null}
                 <div 
-                  className={`w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold text-lg border-2 border-gray-200 ${profileImage ? 'hidden' : 'flex'}`}
+                  className={`w-12 h-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white font-semibold text-lg border-2 border-white border-opacity-30 ${profileImage ? 'hidden' : 'flex'}`}
                 >
                   {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
                 </div>
               </div>
               
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Student Dashboard</h1>
-                <p className="text-gray-600">Welcome back, {user?.name}</p>
-                <p className="text-sm text-blue-600">Department: {user?.department}</p>
+                <h1 className="text-2xl font-bold text-white">Student Dashboard</h1>
+                <p className="text-white text-opacity-90">Welcome back, {user?.name}</p>
+                <p className="text-sm text-white text-opacity-80 bg-white bg-opacity-20 inline-block px-3 py-1 rounded-full mt-1">
+                  📍 Department: {user?.department}
+                </p>
               </div>
             </div>
             <button
               onClick={logout}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
             >
               Logout
             </button>
@@ -284,14 +311,14 @@ const StudentDashboard = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Profile Section */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 mb-8">
           <div className="flex items-center">
             <div className="relative mr-6">
               {user?.profileImage ? (
                 <img
                   src={user.profileImage}
                   alt={`${user.name}'s profile`}
-                  className="w-20 h-20 rounded-full object-cover border-4 border-gray-200"
+                  className="w-20 h-20 rounded-full object-cover border-4 border-blue-200"
                   onError={(e) => {
                     e.target.style.display = 'none';
                     e.target.nextSibling.style.display = 'flex';
@@ -299,13 +326,13 @@ const StudentDashboard = () => {
                 />
               ) : null}
               <div 
-                className={`w-20 h-20 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold text-2xl border-4 border-gray-200 ${user?.profileImage ? 'hidden' : 'flex'}`}
+                className={`w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-2xl border-4 border-blue-200 shadow-lg ${user?.profileImage ? 'hidden' : 'flex'}`}
               >
                 {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
               </div>
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">{user?.name}</h2>
+              <h2 className="text-2xl font-bold text-gray-800">{user?.name}</h2>
               <p className="text-gray-600">{user?.email}</p>
               {rollNumber && (
                 <p className="text-sm text-purple-600 font-medium">Roll Number: {rollNumber}</p>
@@ -323,39 +350,47 @@ const StudentDashboard = () => {
 
         {/* Attendance Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gradient-to-br from-white to-green-50 rounded-2xl shadow-lg border border-green-100 p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <span className="text-3xl mr-3">📊</span>
+              <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">📊</span>
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Overall Attendance</p>
+                <p className="text-sm text-gray-600 font-medium">Overall Attendance</p>
                 <p className="text-2xl font-bold text-green-600">{overall}</p>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <span className="text-3xl mr-3">✅</span>
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">✅</span>
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Present Days</p>
-                <p className="text-2xl font-bold text-gray-900">{presentDays}</p>
+                <p className="text-sm text-gray-600 font-medium">Present Days</p>
+                <p className="text-2xl font-bold text-gray-800">{presentDays}</p>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gradient-to-br from-white to-red-50 rounded-2xl shadow-lg border border-red-100 p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <span className="text-3xl mr-3">❌</span>
+              <div className="bg-gradient-to-br from-red-500 to-pink-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">❌</span>
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Absent Days</p>
-                <p className="text-2xl font-bold text-red-600">{absentDays}</p>
+                <p className="text-sm text-gray-600 font-medium">Absent Days</p>
+                <p className="text-2xl font-bold text-gray-800">{absentDays}</p>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gradient-to-br from-white to-purple-50 rounded-2xl shadow-lg border border-purple-100 p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <span className="text-3xl mr-3">📚</span>
+              <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">📚</span>
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Total Working Days</p>
-                <p className="text-2xl font-bold text-gray-900">{totalWorkingDays}</p>
+                <p className="text-sm text-gray-600 font-medium">Total Working Days</p>
+                <p className="text-2xl font-bold text-gray-800">{totalWorkingDays}</p>
               </div>
             </div>
           </div>
@@ -385,11 +420,49 @@ const StudentDashboard = () => {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Today's Schedule */}
-          <div className="bg-white rounded-lg shadow-md p-6">
+          {/* Holiday Information */}
+          <div className="bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl shadow-lg p-6 border border-amber-200">
             <div className="flex items-center mb-4">
-              <span className="text-3xl mr-3">📅</span>
-              <h3 className="text-lg font-semibold">Today's Status</h3>
+              <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">🎉</span>
+              </div>
+              <h3 className="text-lg font-bold text-amber-900">Upcoming Holidays</h3>
+            </div>
+            {holidays.length > 0 ? (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {holidays.slice(0, 10).map((holiday, index) => (
+                  <div key={holiday.id || index} className="bg-gradient-to-r from-white to-amber-50 rounded-xl p-3 border border-amber-200 hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900">
+                          {new Date(holiday.date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          })}
+                        </p>
+                        <p className="text-sm text-gray-600 mt-1">{holiday.reason}</p>
+                      </div>
+                      <span className="text-2xl ml-2">🎊</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6">
+                <p className="text-gray-600">No upcoming holidays scheduled</p>
+              </div>
+            )}
+          </div>
+
+          {/* Today's Schedule */}
+          <div className="bg-gradient-to-br from-white to-pink-50 rounded-2xl shadow-lg p-6 border border-pink-100">
+            <div className="flex items-center mb-4">
+              <div className="bg-gradient-to-br from-pink-500 to-rose-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">📅</span>
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">Today's Status</h3>
             </div>
             <div className={`p-4 rounded-lg ${
               todayStatus === 'Present' ? 'bg-green-50 border-l-4 border-green-500' : 

@@ -67,14 +67,19 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800 flex items-center justify-center p-2 sm:p-4">
-      <div className="w-full max-w-md mx-auto">
+      <div className="w-full max-w-md mx-auto flex flex-col items-center">
         {/* Logo and Title */}
-        <div className="text-center mb-6 sm:mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-white rounded-full mb-3 sm:mb-4 shadow-lg">
+        <div className="flex flex-col items-center justify-center mb-5 sm:mb-6 w-full">
+          <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-white rounded-full mb-3 sm:mb-4 shadow-xl">
             <span className="text-2xl sm:text-3xl">🎓</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">Attendance Tracker</h1>
-          <p className="text-blue-100 text-sm sm:text-base">Sign in to your account</p>
+          <h1 className="text-sm sm:text-base md:text-lg lg:text-xl xl:text-2xl font-bold text-white mb-1.5 whitespace-nowrap leading-tight text-center w-full">
+            Er. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING
+          </h1>
+          <p className="text-white text-xs sm:text-sm font-semibold mb-2 sm:mb-3 tracking-wider text-center w-full">
+            (AUTONOMOUS INSTITUTION)
+          </p>
+          <p className="text-blue-100 text-sm sm:text-base font-medium text-center mt-1 w-full">Sign in to your account</p>
         </div>
 
         {/* Login Card */}

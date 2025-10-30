@@ -175,21 +175,24 @@ const StudentProfile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Sticky Header */}
-      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+          <div className="flex justify-between items-center py-6">
             <div className="flex items-center">
               <button
                 onClick={() => navigate(-1)}
-                className="mr-4 p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white p-3 rounded-xl transition-all duration-200 mr-4 shadow-lg"
               >
                 ← Back
               </button>
+              <div className="bg-white bg-opacity-20 p-3 rounded-xl mr-4">
+                <span className="text-3xl">👨‍🎓</span>
+              </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Student Profile</h1>
-                <p className="text-gray-600">{studentData.name} - {studentData.rollNumber}</p>
+                <h1 className="text-2xl font-bold text-white">Student Profile</h1>
+                <p className="text-white text-opacity-90">{studentData.name} - {studentData.rollNumber}</p>
               </div>
             </div>
           </div>
@@ -201,8 +204,26 @@ const StudentProfile = () => {
           {/* Left Column - Personal Info & Stats */}
           <div className="lg:col-span-1 space-y-6">
             {/* Personal Information */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
+            <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6">
+              <div className="flex items-center mb-4">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
+                  <span className="text-2xl">👤</span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">Personal Information</h3>
+              </div>
+              <div className="flex justify-center mb-4">
+                {studentData?.profileImage ? (
+                  <img
+                    src={studentData.profileImage}
+                    alt={studentData?.name || 'Profile'}
+                    className="w-24 h-24 rounded-full object-cover border border-gray-200"
+                  />
+                ) : (
+                  <div className="w-24 h-24 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-3xl font-bold border border-gray-200">
+                    {(studentData?.name || 'S').charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
               <div className="space-y-3">
                 <div>
                   <label className="text-sm font-medium text-gray-500">Roll Number</label>
@@ -221,6 +242,10 @@ const StudentProfile = () => {
                   <p className="text-gray-900">{studentData.mobile}</p>
                 </div>
                 <div>
+                  <label className="text-sm font-medium text-gray-500">Parent's Phone Number</label>
+                  <p className="text-gray-900">{studentData.parentContact && studentData.parentContact !== 'N/A' ? studentData.parentContact : 'Not available'}</p>
+                </div>
+                <div>
                   <label className="text-sm font-medium text-gray-500">Department</label>
                   <p className="text-gray-900">{studentData.department}</p>
                 </div>
@@ -236,8 +261,13 @@ const StudentProfile = () => {
 
             {/* Attendance Summary Cards */}
             {attendanceStats && (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h3>
+              <div className="bg-gradient-to-br from-white to-green-50 rounded-2xl shadow-lg border border-green-100 p-6">
+                <div className="flex items-center mb-4">
+                  <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-3 rounded-xl mr-3 shadow-lg">
+                    <span className="text-2xl">📊</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800">Attendance Summary</h3>
+                </div>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
                     <div className="flex items-center">
@@ -261,6 +291,14 @@ const StudentProfile = () => {
                       <span className="font-medium text-yellow-800">Not Marked</span>
                     </div>
                     <span className="text-2xl font-bold text-yellow-600">{attendanceStats.notMarkedDays || 0}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-amber-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">🎉</span>
+                      <span className="font-medium text-amber-800">Holidays</span>
+                    </div>
+                    <span className="text-2xl font-bold text-amber-600">{attendanceStats.holidayCount || 0}</span>
                   </div>
                   
                   <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
@@ -303,9 +341,14 @@ const StudentProfile = () => {
           {/* Right Column - Calendar & Recent Attendance */}
           <div className="lg:col-span-2 space-y-6">
             {/* Monthly Calendar */}
-            <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="bg-gradient-to-br from-white to-pink-50 rounded-2xl shadow-lg border border-pink-100 p-6">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-semibold text-gray-900">Monthly Calendar View</h3>
+                <div className="flex items-center">
+                  <div className="bg-gradient-to-br from-pink-500 to-rose-600 p-3 rounded-xl mr-3 shadow-lg">
+                    <span className="text-2xl">📅</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800">Monthly Calendar View</h3>
+                </div>
                 <div className="flex items-center space-x-4">
                   <input
                     type="month"
@@ -329,8 +372,13 @@ const StudentProfile = () => {
             </div>
 
             {/* Recent Attendance */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Attendance (Last 30 Days)</h3>
+            <div className="bg-gradient-to-br from-white to-amber-50 rounded-2xl shadow-lg border border-amber-100 p-6">
+              <div className="flex items-center mb-4">
+                <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-3 rounded-xl mr-3 shadow-lg">
+                  <span className="text-2xl">📋</span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">Recent Attendance (Last 30 Days)</h3>
+              </div>
               {recentAttendance.length > 0 ? (
                 <div className="space-y-2">
                   {recentAttendance.slice(0, 10).map((record, index) => (

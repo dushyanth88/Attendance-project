@@ -6,7 +6,67 @@ import { normalizeDateToString, isValidDateString } from '../utils/dateUtils.js'
 
 const router = express.Router();
 
-// All holiday routes require authentication and faculty or above role
+// @desc    Get holidays for student's department (Student access)
+// @route   GET /api/holidays/student
+// @access  Authenticated students
+router.get('/student', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    // Only allow students to access this endpoint
+    if (user.role !== 'student') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only students can access this endpoint'
+      });
+    }
+
+    // Get student's department
+    const Student = (await import('../models/Student.js')).default;
+    const student = await Student.findOne({ userId: user._id });
+    
+    if (!student) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Student profile not found'
+      });
+    }
+
+    // Get current and future holidays
+    const today = new Date().toISOString().split('T')[0];
+    const holidays = await Holiday.find({
+      department: student.department,
+      isDeleted: false,
+      holidayDate: { $gte: today }
+    })
+      .sort({ holidayDate: 1 })
+      .limit(50);
+
+    console.log('🎉 Fetching holidays for student:', {
+      department: student.department,
+      foundHolidays: holidays.length
+    });
+
+    res.json({
+      status: 'success',
+      data: holidays.map(holiday => ({
+        id: holiday._id,
+        date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
+        reason: holiday.reason,
+        createdAt: holiday.createdAt
+      }))
+    });
+
+  } catch (error) {
+    console.error('Get student holidays error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch holidays'
+    });
+  }
+});
+
+// All other holiday routes require authentication and faculty or above role
 router.use(authenticate);
 router.use(facultyAndAbove);
 

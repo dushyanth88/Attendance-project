@@ -301,10 +301,10 @@ const ClassAttendanceManagement = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading class data...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading class data...</p>
         </div>
       </div>
     );
@@ -383,16 +383,16 @@ const ClassAttendanceManagement = () => {
             </div>
 
       {/* Tab Navigation */}
-      <div className="bg-white border-b">
+      <div className="bg-white border-b shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-8">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                className={`py-4 px-1 border-b-2 font-semibold text-sm transition-all duration-200 ${
                   activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600'
+                    ? 'border-indigo-500 text-indigo-600 bg-gradient-to-b from-white to-indigo-50'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -675,15 +675,22 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
   };
 
   return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-medium text-gray-900">Mark Daily Attendance</h2>
-        <p className="text-sm text-gray-500">Mark attendance for today's class</p>
-              </div>
+    <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100">
+      <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-white">
+        <div className="flex items-center">
+          <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
+            <span className="text-2xl">📝</span>
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">Mark Daily Attendance</h2>
+            <p className="text-sm text-gray-600">Mark attendance for today's class</p>
+          </div>
+        </div>
+      </div>
       <div className="p-6">
         {/* Attendance Status Indicator */}
         {attendanceMarked && !editMode && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="mb-6 p-4 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl shadow-sm">
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
@@ -705,8 +712,8 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
         <form onSubmit={handleMarkAttendance} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                📅 Date
               </label>
                 <input 
                 type="text"
@@ -717,27 +724,27 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                   year: 'numeric' 
                 })}
                 readOnly
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 cursor-not-allowed"
+                className="w-full px-4 py-3 border border-blue-300 rounded-xl bg-blue-50 cursor-not-allowed shadow-sm"
               />
               <p className="text-xs text-gray-500 mt-1">Today's date - attendance can only be marked for today</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Total Class Strength
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                👥 Total Class Strength
               </label>
               <input
                 type="number"
                 name="present"
                 value={totalClassStrength}
                 readOnly
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                className="w-full px-4 py-3 border border-blue-300 rounded-xl bg-blue-50 shadow-sm"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-              Absent Students (Enter roll numbers separated by commas)
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              ⏭️ Absent Students (Enter roll numbers separated by commas)
               </label>
               <textarea
                 name="absentees"
@@ -745,7 +752,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                 onChange={handleAttendanceChange}
               placeholder="e.g., STU001, STU003, STU005"
                 rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
               />
             </div>
 
@@ -755,11 +762,11 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                 <button
                   type="button"
                   onClick={handleEditMode}
-                  className="bg-yellow-600 text-white px-6 py-2 rounded-md hover:bg-yellow-700 transition-colors"
+                  className="bg-gradient-to-r from-yellow-500 to-orange-600 text-white px-6 py-3 rounded-xl hover:from-yellow-600 hover:to-orange-700 transition-all duration-200 shadow-lg font-semibold"
                 >
                   ✏️ Edit Attendance
                 </button>
-                <div className="flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-md">
+                <div className="flex items-center px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl shadow-lg font-semibold">
                   ✅ Attendance Marked
                 </div>
               </>
@@ -768,14 +775,14 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                 <button
                   type="button"
                   onClick={handleCancelEdit}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-md hover:bg-gray-600 transition-colors"
+                  className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-6 py-3 rounded-xl hover:from-gray-500 hover:to-gray-600 transition-all duration-200 shadow-lg font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={attendanceLoading || (attendanceMarked && !editMode)}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg font-semibold"
                 >
                   {attendanceLoading ? 'Marking...' : editMode ? 'Update Attendance' : 'Mark Attendance'}
                 </button>
@@ -785,12 +792,17 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
           </form>
 
         {/* Students List */}
-        <div className="mt-8">
+        <div className="mt-8 bg-gradient-to-br from-white to-purple-50 rounded-2xl p-6 border border-purple-100">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900">
-              Students in Class
-            </h3>
-            <div className="text-sm text-gray-500">
+            <div className="flex items-center">
+              <div className="bg-gradient-to-br from-purple-500 to-pink-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">👥</span>
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">
+                Students in Class
+              </h3>
+            </div>
+            <div className="text-sm text-gray-600 font-semibold bg-white px-4 py-2 rounded-xl shadow-sm">
               {searchTerm ? (
                 `Showing ${filteredStudents.length} of ${students.length} students`
               ) : (
@@ -812,7 +824,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                 placeholder="Search by roll number, name, or email..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="block w-full pl-10 pr-3 py-3 border border-purple-300 rounded-xl leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-purple-500 sm:text-sm shadow-sm"
               />
               {searchTerm && (
                 <button
@@ -828,7 +840,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
           </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-gradient-to-r from-purple-100 to-pink-100">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Roll Number
@@ -871,7 +883,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                     </tr>
                   ) : (
                     filteredStudents.map((student) => (
-                      <tr key={student._id || student.id} className="hover:bg-gray-50">
+                      <tr key={student._id || student.id} className="hover:bg-purple-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                           {student.rollNumber}
                         </td>

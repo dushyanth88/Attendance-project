@@ -247,13 +247,16 @@ const StudentManagementPage = () => {
 
   if (facultyProfile && !facultyProfile.is_class_advisor) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8 text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Access Denied</h2>
+          <div className="bg-gradient-to-br from-red-400 to-red-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center">
+            <span className="text-3xl">🚫</span>
+          </div>
+          <h2 className="mt-6 text-3xl font-extrabold text-gray-800">Access Denied</h2>
           <p className="mt-2 text-sm text-gray-600">You are not assigned as a class advisor. Please contact your HOD or Admin.</p>
           <button
             onClick={() => navigate('/faculty/dashboard')}
-            className="mt-5 w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            className="mt-5 w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
           >
             Go to Dashboard
           </button>
@@ -264,13 +267,16 @@ const StudentManagementPage = () => {
 
   if (!batch || !year || !semester || !department) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8 text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Invalid Access</h2>
+          <div className="bg-gradient-to-br from-yellow-400 to-orange-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center">
+            <span className="text-3xl">⚠️</span>
+          </div>
+          <h2 className="mt-6 text-3xl font-extrabold text-gray-800">Invalid Access</h2>
           <p className="mt-2 text-sm text-gray-600">Please select a batch from the assigned batches page.</p>
           <button
             onClick={() => navigate('/assigned-batches')}
-            className="mt-5 w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            className="mt-5 w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
           >
             Go to Assigned Batches
           </button>
@@ -280,32 +286,32 @@ const StudentManagementPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Sticky Header */}
-      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Student Management</h1>
-              <p className="text-gray-600">
-                Managing Students for <span className="font-semibold text-indigo-600">
+              <h1 className="text-2xl font-bold text-white">Student Management</h1>
+              <p className="text-white text-opacity-90">
+                Managing Students for <span className="font-semibold">
                   {classTitle || `${batch} | ${year} | Semester ${semester}`}
                 </span>
               </p>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-white text-opacity-80 mt-1">
                 Department: {department} • Total Students: {students.length}
               </p>
             </div>
             <div className="flex space-x-3">
               <button
                 onClick={() => navigate('/faculty/dashboard')}
-                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
               >
                 ← Back to Dashboard
               </button>
               <button
                 onClick={handleBulkUpload}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm flex items-center"
               >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -314,7 +320,7 @@ const StudentManagementPage = () => {
               </button>
               <button
                 onClick={() => setShowAddModal(true)}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm flex items-center"
               >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -331,21 +337,21 @@ const StudentManagementPage = () => {
         {loading ? (
           <div className="flex justify-center items-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-            <span className="ml-3 text-gray-600">Loading students...</span>
+            <span className="ml-3 text-gray-600 font-medium">Loading students...</span>
           </div>
         ) : students.length === 0 ? (
           <div className="text-center py-12">
-            <div className="mx-auto h-24 w-24 text-gray-400">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-6 rounded-2xl mx-auto w-24 h-24 flex items-center justify-center mb-6">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-12 h-12 text-white">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
               </svg>
             </div>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No students found</h3>
-            <p className="mt-1 text-sm text-gray-500">Get started by adding a new student to this batch.</p>
+            <h3 className="mt-2 text-lg font-semibold text-gray-800">No students found</h3>
+            <p className="mt-1 text-sm text-gray-600">Get started by adding a new student to this batch.</p>
             <div className="mt-6">
               <button
                 onClick={() => setShowAddModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="inline-flex items-center px-6 py-3 border border-transparent shadow-lg text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
               >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -355,10 +361,10 @@ const StudentManagementPage = () => {
             </div>
           </div>
         ) : (
-          <div className="bg-white shadow-md rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+          <div className="bg-gradient-to-br from-white to-gray-50 shadow-lg rounded-2xl overflow-hidden border border-gray-100">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-medium text-gray-900">
+                <h3 className="text-lg font-semibold text-gray-800">
                   Students ({students.length})
                 </h3>
               </div>
@@ -376,7 +382,7 @@ const StudentManagementPage = () => {
                     placeholder="Search students by roll number or name..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm"
                   />
                   {searchTerm && (
                     <button

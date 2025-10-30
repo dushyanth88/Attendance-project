@@ -182,15 +182,20 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
         />
       )}
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+        <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-2xl max-w-md w-full max-h-[95vh] overflow-y-auto border border-blue-100">
           <div className="p-4 sm:p-6">
             <div className="flex justify-between items-center mb-4 sm:mb-6">
-              <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 pr-2">
-                Add Student to {assignedClass}
-              </h2>
+              <div className="flex items-center">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
+                  <span className="text-2xl">👨‍🎓</span>
+                </div>
+                <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 pr-2">
+                  Add Student to {assignedClass}
+                </h2>
+              </div>
               <button
                 onClick={handleClose}
-                className="text-gray-400 hover:text-gray-600 text-xl sm:text-2xl p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                className="text-gray-400 hover:text-gray-600 text-xl sm:text-2xl p-1 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-gray-100 rounded-lg transition-colors"
               >
                 ×
               </button>
@@ -380,7 +385,7 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors text-sm sm:text-base min-h-[44px]"
+                  className="w-full sm:w-auto px-6 py-3 text-gray-700 bg-gradient-to-r from-gray-200 to-gray-300 rounded-xl hover:from-gray-300 hover:to-gray-400 transition-all duration-200 text-sm sm:text-base min-h-[44px] shadow-lg font-semibold"
                   disabled={loading}
                 >
                   Cancel
@@ -388,7 +393,7 @@ const CreateStudentModal = ({ isOpen, onClose, onStudentCreated, assignedClass }
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base min-h-[44px]"
+                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base min-h-[44px] shadow-lg font-semibold"
                 >
                   {loading ? 'Adding...' : 'Add Student'}
                 </button>

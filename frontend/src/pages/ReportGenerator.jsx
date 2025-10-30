@@ -160,7 +160,10 @@ const ReportGenerator = () => {
   if (!classInfo) {
     return (
       <div className="p-6 text-center">
-        <p className="text-gray-500">No class selected</p>
+        <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center mb-4">
+          <span className="text-3xl">📊</span>
+        </div>
+        <p className="text-gray-600 font-medium">No class selected</p>
       </div>
     );
   }
@@ -177,36 +180,36 @@ const ReportGenerator = () => {
       
       <div className="p-6">
         <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Report Generator</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">📊 Report Generator</h2>
           <p className="text-gray-600">
             Generate attendance reports for {classInfo.year} | Semester {classInfo.semester} | Section {classInfo.section}
           </p>
         </div>
 
         {/* Report Configuration */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Report Configuration</h3>
+        <div className="bg-gradient-to-br from-white to-blue-50 border border-blue-100 rounded-2xl shadow-lg p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Report Configuration</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Report Type */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Report Type
+              <label className="block text-sm font-semibold text-gray-700 mb-3">
+                📋 Report Type
               </label>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {reportTypes.map((type) => (
-                  <label key={type.id} className="flex items-center">
+                  <label key={type.id} className="flex items-center p-3 bg-white rounded-xl border border-gray-200 hover:border-blue-300 transition-colors cursor-pointer">
                     <input
                       type="radio"
                       name="reportType"
                       value={type.id}
                       checked={reportType === type.id}
                       onChange={(e) => setReportType(e.target.value)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300"
                     />
                     <div className="ml-3">
-                      <div className="text-sm font-medium text-gray-900">{type.label}</div>
-                      <div className="text-sm text-gray-500">{type.description}</div>
+                      <div className="text-sm font-semibold text-gray-800">{type.label}</div>
+                      <div className="text-sm text-gray-600">{type.description}</div>
                     </div>
                   </label>
                 ))}
@@ -215,26 +218,26 @@ const ReportGenerator = () => {
 
             {/* Date Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date Range
+              <label className="block text-sm font-semibold text-gray-700 mb-3">
+                📅 Date Range
               </label>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Start Date</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">Start Date</label>
                   <input
                     type="date"
                     value={dateRange.startDate}
                     onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">End Date</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">End Date</label>
                   <input
                     type="date"
                     value={dateRange.endDate}
                     onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                   />
                 </div>
               </div>
@@ -246,7 +249,7 @@ const ReportGenerator = () => {
             <button
               onClick={generateReport}
               disabled={loading}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-8 py-3 rounded-xl hover:from-indigo-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg font-semibold"
             >
               {loading ? 'Generating...' : 'Generate Report'}
             </button>
@@ -255,19 +258,19 @@ const ReportGenerator = () => {
 
         {/* Report Results */}
         {reportData && (
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <div className="bg-gradient-to-br from-white to-green-50 border border-green-100 rounded-2xl shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-900">Report Results</h3>
-              <div className="flex space-x-2">
+              <h3 className="text-lg font-semibold text-gray-800">Report Results</h3>
+              <div className="flex space-x-3">
                 <button
                   onClick={exportToPDF}
-                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm"
+                  className="bg-gradient-to-r from-red-500 to-pink-600 text-white px-4 py-2 rounded-xl hover:from-red-600 hover:to-pink-700 transition-all duration-200 text-sm shadow-lg font-semibold"
                 >
                   📄 Export PDF
                 </button>
                 <button
                   onClick={exportToExcel}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm"
+                  className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all duration-200 text-sm shadow-lg font-semibold"
                 >
                   📊 Export Excel
                 </button>

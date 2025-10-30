@@ -54,14 +54,16 @@ const FacultyClassDashboard = () => {
 
   if (!activeClass) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="text-6xl mb-4">🎓</div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">No Class Selected</h2>
+          <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center mb-4">
+            <span className="text-3xl">🎓</span>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">No Class Selected</h2>
           <p className="text-gray-600 mb-6">Please select a class to manage.</p>
           <button
             onClick={() => navigate('/faculty/class-management')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all duration-200 shadow-lg font-semibold"
           >
             Select Class
           </button>
@@ -82,24 +84,24 @@ const FacultyClassDashboard = () => {
         />
       )}
       
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b sticky top-0 z-40">
+        <header className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center py-4">
+            <div className="flex justify-between items-center py-6">
               <div className="flex items-center">
                 <button
                   onClick={() => navigate('/faculty/class-management')}
-                  className="mr-4 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white p-3 rounded-xl transition-all duration-200 mr-4 shadow-lg"
                   title="Back to Class Management"
                 >
                   ←
                 </button>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">
+                  <h1 className="text-2xl font-bold text-white">
                     {getClassDisplayName(activeClass)}
                   </h1>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-white text-opacity-90">
                     Batch: {activeClass.batch} | Faculty: {user?.name}
                   </p>
                 </div>
@@ -116,22 +118,22 @@ const FacultyClassDashboard = () => {
                         handleClassSwitch(selectedClass);
                       }
                     }}
-                    className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="appearance-none bg-white bg-opacity-20 border border-white border-opacity-30 rounded-xl px-4 py-3 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50 backdrop-blur-sm"
                   >
                     {assignedClasses.map((classData) => (
-                      <option key={classData._id} value={classData._id}>
+                      <option key={classData._id} value={classData._id} className="text-gray-800">
                         {getClassDisplayName(classData)}
                       </option>
                     ))}
                   </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                    <span className="text-gray-400">▼</span>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                    <span className="text-white">▼</span>
                   </div>
                 </div>
                 
                 <button
                   onClick={() => navigate('/faculty/class-management')}
-                  className="bg-gray-600 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                  className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
                 >
                   Manage Classes
                 </button>
@@ -141,16 +143,16 @@ const FacultyClassDashboard = () => {
         </header>
 
         {/* Navigation Tabs */}
-        <div className="bg-white border-b">
+        <div className="bg-white border-b shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <nav className="flex space-x-8">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  className={`py-4 px-1 border-b-2 font-semibold text-sm transition-all duration-200 ${
                     activeTab === tab.id
-                      ? 'border-blue-500 text-blue-600'
+                      ? 'border-indigo-500 text-indigo-600 bg-gradient-to-b from-white to-indigo-50'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
@@ -165,22 +167,24 @@ const FacultyClassDashboard = () => {
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Class Info Banner */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 mb-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <span className="text-2xl mr-3">🎓</span>
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-4 shadow-lg">
+                  <span className="text-2xl">🎓</span>
+                </div>
                 <div>
-                  <h3 className="font-semibold text-blue-900">
+                  <h3 className="font-bold text-gray-800 text-lg">
                     Currently Managing: {getClassDisplayName(activeClass)}
                   </h3>
-                  <p className="text-sm text-blue-700">
+                  <p className="text-gray-600">
                     Batch: {activeClass.batch} | Department: {activeClass.department || 'N/A'}
                   </p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-sm text-blue-600">Class Key</p>
-                <p className="text-xs text-blue-500 font-mono">
+                <p className="text-sm text-gray-500">Class Key</p>
+                <p className="text-xs text-gray-600 font-mono">
                   {activeClass.batch}-{activeClass.year}-{activeClass.semester}-{activeClass.section}
                 </p>
               </div>
@@ -189,7 +193,7 @@ const FacultyClassDashboard = () => {
 
           {/* Active Tab Content */}
           {ActiveComponent && (
-            <div className="bg-white rounded-lg shadow-md">
+            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100">
               <ActiveComponent />
             </div>
           )}

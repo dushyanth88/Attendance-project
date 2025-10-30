@@ -181,18 +181,21 @@ const ClassManagementPage = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading class management...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Fixed Navbar */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white shadow-sm border-b">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center h-20">
             {/* Faculty Details - Left Side */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-3">
@@ -249,14 +252,14 @@ const ClassManagementPage = () => {
                 </div>
                 
                 <div>
-                  <h4 className="text-lg font-semibold text-gray-900">
+                  <h4 className="text-xl font-bold text-white">
                     {facultyProfile?.name || user?.name || 'Faculty'}
                   </h4>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-white text-opacity-90">
                     {facultyProfile?.department || user?.department}
                   </p>
                   {facultyProfile?.email && (
-                    <small className="text-xs text-gray-500">
+                    <small className="text-xs text-white text-opacity-80">
                       {facultyProfile.email}
                     </small>
                   )}
@@ -267,7 +270,7 @@ const ClassManagementPage = () => {
             {/* Logout Button - Right Side */}
             <button
               onClick={handleLogout}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
             >
               Logout
             </button>
@@ -276,40 +279,56 @@ const ClassManagementPage = () => {
       </nav>
 
       {/* Main Content */}
-      <main className="pt-20">
+      <main className="pt-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">Class Management</h1>
-            <p className="mt-2 text-gray-600">
-              Manage your assigned classes and access attendance features
-            </p>
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 shadow-xl">
+              <div className="flex items-center">
+                <div className="bg-white bg-opacity-20 p-3 rounded-xl mr-4">
+                  <span className="text-3xl">📚</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-white">Class Management</h1>
+                  <p className="mt-2 text-white text-opacity-90">
+                    Manage your assigned classes and access attendance features
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Assigned Classes Section */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Your Assigned Classes</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Click "Manage" to access attendance, reports, and student data for each class
-              </p>
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100">
+            <div className="px-6 py-6 border-b border-blue-200">
+              <div className="flex items-center">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-4 shadow-lg">
+                  <span className="text-2xl">🎓</span>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Your Assigned Classes</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Click "Manage" to access attendance, reports, and student data for each class
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="p-6">
               {assignedClasses.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {assignedClasses.map((cls, index) => (
-                    <div key={cls.classId || index} className="bg-gray-50 rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                    <div key={cls.classId || index} className="bg-gradient-to-br from-white to-purple-50 rounded-2xl border border-purple-100 p-6 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                          <h3 className="text-lg font-bold text-gray-800 mb-2">
                             {cls.batch} | {cls.year} | Semester {cls.semester} | Section {cls.section}
                           </h3>
                           
                           <div className="space-y-2 text-sm text-gray-600">
                             <div className="flex items-center">
                               <span className="font-medium mr-2">Batch:</span>
-                              <span className="text-blue-600 font-semibold">{cls.batch}</span>
+                              <span className="text-purple-600 font-semibold">{cls.batch}</span>
                             </div>
                             <div className="flex items-center">
                               <span className="font-medium mr-2">Year:</span>
@@ -334,7 +353,7 @@ const ClassManagementPage = () => {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg">
                           Active
                         </span>
                       </div>
@@ -345,7 +364,7 @@ const ClassManagementPage = () => {
                         </div>
                         <button
                           onClick={() => handleManageClass(cls.classId)}
-                          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                          className="bg-gradient-to-r from-blue-500 to-cyan-600 text-white px-4 py-2 rounded-xl hover:from-blue-600 hover:to-cyan-700 transition-all duration-200 text-sm font-medium shadow-lg"
                         >
                           Manage Class
                         </button>
@@ -355,21 +374,25 @@ const ClassManagementPage = () => {
                 </div>
               ) : (
                 <div className="text-center py-12">
-                  <div className="text-gray-500 mb-4">
-                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Assigned Classes</h3>
-                  <p className="text-gray-500 mb-4">
-                    You don't have any classes assigned yet. Contact your HOD for class assignments.
-                  </p>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
-                    <p className="text-sm text-blue-800">
-                      <strong>Note:</strong> Class assignments are managed by your HOD. 
-                      Once assigned, you'll be able to manage attendance, view students, 
-                      and generate reports for your assigned classes.
+                  <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl p-8 shadow-lg border border-gray-100">
+                    <div className="text-gray-500 mb-4">
+                      <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-4 rounded-2xl mx-auto w-16 h-16 flex items-center justify-center">
+                        <svg className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      </div>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2">No Assigned Classes</h3>
+                    <p className="text-gray-600 mb-4">
+                      You don't have any classes assigned yet. Contact your HOD for class assignments.
                     </p>
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 max-w-md mx-auto">
+                      <p className="text-sm text-blue-800">
+                        <strong>Note:</strong> Class assignments are managed by your HOD. 
+                        Once assigned, you'll be able to manage attendance, view students, 
+                        and generate reports for your assigned classes.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

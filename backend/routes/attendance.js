@@ -1293,32 +1293,6 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
         }
       }
 
-      // Check if the date is a Sunday
-      const attendanceDate = req.body.date ? new Date(req.body.date) : new Date();
-      const dayOfWeek = attendanceDate.getDay();
-      if (dayOfWeek === 0) { // Sunday
-        return res.status(400).json({
-          status: 'error',
-          message: 'Attendance cannot be marked on Sundays. Sundays are automatically treated as holidays.'
-        });
-      }
-
-      // Check if the date is a declared holiday
-      const Holiday = (await import('../models/Holiday.js')).default;
-      const attendanceDateString = attendanceDate.toISOString().split('T')[0];
-      const holiday = await Holiday.findOne({
-        holidayDate: attendanceDateString,
-        department: currentUser.department,
-        isDeleted: false
-      });
-
-      if (holiday) {
-        return res.status(400).json({
-          status: 'error',
-          message: `Attendance cannot be marked on ${attendanceDateString}. This date has been declared as a holiday: ${holiday.reason}`
-        });
-      }
-
     // Get the selected date in IST and convert to YYYY-MM-DD string format
     let requestDateString;
     if (req.body.date) {
@@ -1332,6 +1306,31 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       const now = new Date();
       const istDate = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
       requestDateString = istDate.toISOString().split('T')[0];
+    }
+
+    // Check if the date is a Sunday
+    const attendanceDate = new Date(requestDateString + 'T00:00:00');
+    const dayOfWeek = attendanceDate.getDay();
+    if (dayOfWeek === 0) { // Sunday
+      return res.status(400).json({
+        status: 'error',
+        message: 'Attendance cannot be marked on Sundays. Sundays are automatically treated as holidays.'
+      });
+    }
+
+    // Check if the date is a declared holiday
+    const Holiday = (await import('../models/Holiday.js')).default;
+    const holiday = await Holiday.findOne({
+      holidayDate: requestDateString,
+      department: currentUser.department,
+      isDeleted: false
+    });
+
+    if (holiday) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Attendance cannot be marked on ${requestDateString}. This date has been declared as a holiday: ${holiday.reason}`
+      });
     }
 
     // Fetch students from Student Management list
