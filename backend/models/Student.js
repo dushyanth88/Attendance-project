@@ -144,15 +144,24 @@ studentSchema.pre('save', function(next) {
   next();
 });
 
-// Compound unique index to enforce roll number unique within class (only for non-null classId)
-// Temporarily commented out to avoid index conflicts during migration
-// studentSchema.index(
-//   { classId: 1, rollNumber: 1 }, 
-//   { 
-//     unique: true, 
-//     partialFilterExpression: { classId: { $exists: true, $ne: null } }
-//   }
-// );
+// Enforce that a student belongs to only one class and each roll number is unique within a class
+studentSchema.index(
+  { classId: 1, userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { classId: { $exists: true, $ne: null }, status: 'active' },
+    name: 'unique_student_per_class'
+  }
+);
+
+studentSchema.index(
+  { classId: 1, rollNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { classId: { $exists: true, $ne: null }, status: 'active' },
+    name: 'unique_rollnumber_per_class'
+  }
+);
 
 // Index for efficient querying by class
 studentSchema.index({ classId: 1, status: 1 });
