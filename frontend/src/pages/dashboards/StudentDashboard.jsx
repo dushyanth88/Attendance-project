@@ -22,6 +22,7 @@ const StudentDashboard = () => {
   const [reportSelectedDate, setReportSelectedDate] = useState('');
   const [profileImage, setProfileImage] = useState(user?.profileImage);
   const [holidays, setHolidays] = useState([]);
+  const [showImagePreview, setShowImagePreview] = useState(false);
 
   const handleReasonSubmit = (record) => {
     setSelectedRecord({
@@ -271,7 +272,7 @@ const StudentDashboard = () => {
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center">
               {/* Profile Picture */}
-              <div className="relative mr-4">
+              <div className="relative mr-4 cursor-pointer" onClick={() => setShowImagePreview(true)}>
                 {profileImage ? (
                   <img
                     src={profileImage}
@@ -313,7 +314,7 @@ const StudentDashboard = () => {
         {/* Profile Section */}
         <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 mb-8">
           <div className="flex items-center">
-            <div className="relative mr-6">
+            <div className="relative mr-6 cursor-pointer" onClick={() => setShowImagePreview(true)}>
               {user?.profileImage ? (
                 <img
                   src={user.profileImage}
@@ -558,6 +559,27 @@ const StudentDashboard = () => {
         attendanceRecord={selectedRecord}
         onSuccess={handleReasonSuccess}
       />
+
+      {/* Profile Image Preview Modal */}
+      {showImagePreview && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50" onClick={() => setShowImagePreview(false)}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-[90%] p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-900">Profile Picture</h3>
+              <button className="text-gray-500 hover:text-gray-700 text-2xl leading-none" onClick={() => setShowImagePreview(false)}>×</button>
+            </div>
+            <div className="flex items-center justify-center">
+              {profileImage ? (
+                <img src={profileImage} alt={`${user?.name || 'Student'} profile`} className="max-h-[70vh] max-w-full rounded-lg object-contain" />
+              ) : (
+                <div className="w-40 h-40 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-5xl font-bold">
+                  {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Date Selector Modal */}
       {showDateSelector && (
