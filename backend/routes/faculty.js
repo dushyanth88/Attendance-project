@@ -33,6 +33,81 @@ const upload = multer({
   }
 });
 
+// @desc    Migrate students from an old class to a newly assigned class
+// @route   POST /api/faculty/:id/migrate-students
+// @access  HOD and above (triggered post-reassignment) or Faculty (self-service if allowed)
+router.post('/:id/migrate-students', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params; // Faculty model id
+    const { from, to, importOldStudents } = req.body;
+
+    // Authorization: HOD/Admin can migrate any; faculty can migrate self
+    const requester = req.user;
+    if (!['admin', 'hod'].includes(requester.role)) {
+      const facultyDoc = await Faculty.findById(id);
+      if (!facultyDoc || facultyDoc.userId.toString() !== requester._id.toString()) {
+        return res.status(403).json({ status: 'error', message: 'Access denied' });
+      }
+    }
+
+    const faculty = await Faculty.findById(id);
+    if (!faculty) {
+      return res.status(404).json({ status: 'error', message: 'Faculty not found' });
+    }
+
+    if (!to || !to.batch || !to.year || !to.semester || !to.section) {
+      return res.status(400).json({ status: 'error', message: 'Target class (to) is required' });
+    }
+
+    const Student = (await import('../models/Student.js')).default;
+
+    let updatedCount = 0;
+    if (importOldStudents && from && from.batch && from.year && from.semester && from.section) {
+      const legacySem = typeof from.semester === 'number' ? `Sem ${from.semester}` : from.semester;
+      const students = await Student.find({
+        batch: from.batch,
+        year: from.year,
+        semester: legacySem,
+        section: from.section,
+        department: faculty.department,
+        status: 'active',
+        facultyId: faculty._id
+      });
+
+      const targetSem = typeof to.semester === 'number' ? `Sem ${to.semester}` : to.semester;
+      const classId = `${to.batch}_${to.year}_${targetSem}_${to.section}`;
+
+      const bulk = Student.collection.initializeUnorderedBulkOp();
+      for (const s of students) {
+        bulk.find({ _id: s._id }).update({
+          $set: {
+            batch: to.batch,
+            year: to.year,
+            semester: targetSem,
+            section: to.section,
+            classAssigned: to.section, // legacy
+            classId,
+            facultyId: faculty._id
+          }
+        });
+      }
+      if (students.length > 0) {
+        const result = await bulk.execute();
+        updatedCount = result.nModified || students.length;
+      }
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: importOldStudents ? `Migrated ${updatedCount} students to the new class` : 'No migration performed',
+      data: { migrated: updatedCount }
+    });
+  } catch (error) {
+    console.error('Error migrating students:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to migrate students' });
+  }
+});
+
 // Profile route for individual faculty (less restrictive)
 router.get('/profile/:userId', authenticate, async (req, res) => {
   try {
@@ -1886,7 +1961,25 @@ router.post('/:id/assign-class', hodAndAbove, [
       });
     }
 
-    // Add the class assignment to Faculty model
+    // Deactivate any currently active advisor assignment(s) for this faculty (old class)
+    const ClassAssignment = (await import('../models/ClassAssignment.js')).default;
+    const activeAssignmentsForFaculty = await ClassAssignment.find({ facultyId: faculty.userId, active: true });
+
+    let oldAssignmentPayload = null;
+    if (activeAssignmentsForFaculty.length > 0) {
+      for (const a of activeAssignmentsForFaculty) {
+        await a.deactivate(currentUser._id);
+      }
+      const a = activeAssignmentsForFaculty[0];
+      oldAssignmentPayload = {
+        batch: a.batch,
+        year: a.year,
+        semester: a.semester,
+        section: a.section
+      };
+    }
+
+    // Add the class assignment to Faculty model (active)
     await faculty.addClassAssignment({
       batch,
       year,
@@ -1919,7 +2012,8 @@ router.post('/:id/assign-class', hodAndAbove, [
           semester,
           section,
           assignedDate: new Date()
-        }
+        },
+        oldAssignment: oldAssignmentPayload
       }
     });
   } catch (error) {
