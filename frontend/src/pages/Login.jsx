@@ -67,17 +67,30 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800 flex items-center justify-center p-2 sm:p-4">
-      <div className="w-full max-w-md mx-auto flex flex-col items-center">
+      {/* Fixed top bar with college name (stays on scroll) */}
+      <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-indigo-700/80 via-purple-700/80 to-pink-700/80 backdrop-blur-sm shadow-md">
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 flex items-center justify-center gap-2 sm:gap-3">
+          <img
+            src="/college-logo.png"
+            alt="College Logo"
+            className="h-6 sm:h-8 md:h-9 w-auto object-contain shadow-sm"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <h1 className="py-3 text-white font-extrabold tracking-wide text-center text-sm sm:text-base md:text-lg lg:text-xl xl:text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
+            Er. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING (Autonomous)
+          </h1>
+        </div>
+      </div>
+
+      <div className="w-full max-w-md mx-auto flex flex-col items-center pt-16">
         {/* Logo and Title */}
         <div className="flex flex-col items-center justify-center mb-5 sm:mb-6 w-full">
           <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-white rounded-full mb-3 sm:mb-4 shadow-xl">
             <span className="text-2xl sm:text-3xl">🎓</span>
           </div>
-          <h1 className="text-sm sm:text-base md:text-lg lg:text-xl xl:text-2xl font-bold text-white mb-1.5 whitespace-nowrap leading-tight text-center w-full">
-            Er. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING
-          </h1>
-          <p className="text-white text-xs sm:text-sm font-semibold mb-2 sm:mb-3 tracking-wider text-center w-full">
-            (AUTONOMOUS INSTITUTION)
+          {/* Title moved to fixed top bar; keep subtle caption under logo only for spacing */}
+          <p className="text-indigo-100/90 text-[10px] sm:text-xs md:text-sm font-semibold mb-2 sm:mb-3 tracking-[0.2em] uppercase text-center w-full select-none">
+            Welcome to the Attendance Portal
           </p>
           <p className="text-blue-100 text-sm sm:text-base font-medium text-center mt-1 w-full">Sign in to your account</p>
         </div>
@@ -177,7 +190,7 @@ const Login = () => {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+            {/* <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
               <label className="flex items-center">
                 <input type="checkbox" className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4" />
                 <span className="ml-2 text-xs sm:text-sm text-gray-600">Remember me</span>
@@ -185,7 +198,7 @@ const Login = () => {
               <a href="#" className="text-xs sm:text-sm text-blue-600 hover:text-blue-800">
                 Forgot password?
               </a>
-            </div>
+            </div> */}
 
             <button
               type="submit"

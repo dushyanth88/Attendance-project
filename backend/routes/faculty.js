@@ -1021,12 +1021,12 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
     const { batch, year, semester, department, section } = req.query;
     const currentUser = req.user;
 
-    console.log('🔍 Students request:', { batch, year, semester, department, userId: currentUser._id });
+    console.log('🔍 Students request:', { batch, year, semester, department, section, userId: currentUser._id });
 
-    if (!batch || !year || !semester || !department) {
+    if (!batch || !year || !semester || !department || !section) {
       return res.status(400).json({
         success: false,
-        message: 'Batch, year, semester, and department are required'
+        message: 'Batch, year, semester, section, and department are required'
       });
     }
 
@@ -1037,7 +1037,7 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
       batch,
       year,
       semester: parseInt(semester),
-      section: section || 'A', // Use provided section or default to 'A'
+      section: section,
       active: true
     });
 
@@ -1050,69 +1050,39 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
         'assignedClasses.batch': batch,
         'assignedClasses.year': year,
         'assignedClasses.semester': parseInt(semester),
-        'assignedClasses.section': section || 'A',
+        'assignedClasses.section': section,
         'assignedClasses.active': true,
         department,
         status: 'active'
       });
     }
 
-    // If still not found, check if faculty exists and has students in this class
-    if (!classAssignment && !faculty) {
-      console.log('⚠️ No formal assignment found, checking if faculty has students in this class...');
-      
-      // Check if there are any students in this class created by this faculty
-      const facultyRecord = await Faculty.findOne({
-        userId: currentUser._id,
-        department,
-        status: 'active'
-      });
-      
-      if (facultyRecord) {
-        // Check if there are students in this class
-        const studentsInClass = await Student.find({
-          batch,
-          year,
-          semester: `Sem ${semester}`,
-          section: section || 'A',
-          department,
-          facultyId: facultyRecord._id,
-          status: 'active'
-        }).limit(1);
-        
-        if (studentsInClass.length > 0) {
-          console.log('✅ Faculty has students in this class, allowing access');
-          faculty = facultyRecord;
-        }
-      }
-    }
-
+    // Verify authorization - faculty must be assigned as class advisor
     if (!classAssignment && !faculty) {
       console.log('❌ Faculty not authorized for this class:', { batch, year, semester, department });
       return res.status(403).json({
         success: false,
-        message: 'You are not authorized to manage students for this class'
+        message: 'You are not authorized to manage students for this class. You are not assigned as the class advisor.'
       });
     }
 
     console.log('✅ Faculty authorized, fetching students for:', { batch, year, semester, department });
 
-    // Find students for this batch/year/semester in the specified department
-    // Only show students created by this faculty
-    const facultyId = classAssignment ? classAssignment.facultyId : faculty._id;
-    
     // Build classId for querying - same format as stored in bulk upload
     // Format: batch_year_semester_section (e.g., "2024-2028_1st Year_Sem 1_A")
     const normalizedYear = year; // Already in correct format from request
     const normalizedSemester = `Sem ${semester}`; // Convert to "Sem X" format
-    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section || 'A'}`;
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section}`;
     
     console.log('🔍 Querying students with classId:', classId);
+    console.log('📝 Note: Fetching students by class details (not by facultyId) to support class advisor reassignment');
     
+    // Fetch students by class details, not by facultyId
+    // This allows new class advisors to see existing students when they're assigned to the class
     // First try with classId for precise matching
     let students = await Student.find({
       classId: classId,
-      facultyId: facultyId, // Only show students created by this faculty
+      department: department,
       status: 'active' // Exclude soft-deleted students
     }).populate('userId', 'name email mobile profileImage').sort({ rollNumber: 1 });
     
@@ -1121,61 +1091,18 @@ router.get('/students', authenticate, facultyAndAbove, async (req, res) => {
       console.log('⚠️ No students found with classId, trying without classId filter...');
       students = await Student.find({
         batch,
-        year,
-        semester: `Sem ${semester}`,
-        department,
-        facultyId: facultyId, // Only show students created by this faculty
+        year: normalizedYear,
+        semester: normalizedSemester,
+        section: section,
+        department: department,
         status: 'active' // Exclude soft-deleted students
       }).populate('userId', 'name email mobile profileImage').sort({ rollNumber: 1 });
     }
+    
+    console.log(`📊 Found ${students.length} students for class ${classId} (fetched by class assignment, not facultyId)`);
 
-    // If no students found in Student model, try User model
-    if (students.length === 0) {
-      console.log('📊 No students found in Student model, checking User model...');
-      
-      // Generate the class string format used in User model
-      // Format 1: "4th Year A" (new format from studentCreationService)
-      const yearNumber = year.includes('1st') ? '1st' : 
-                        year.includes('2nd') ? '2nd' : 
-                        year.includes('3rd') ? '3rd' : '4th';
-      const userClassString1 = `${yearNumber} Year ${section || 'A'}`; // Use provided section or default to A
-      
-      // Format 2: "batch, year, semester" (old format from student.js)
-      const userClassString2 = `${batch}, ${year}, Sem ${semester}`;
-      
-      console.log('🔍 Searching User model with class formats:', { userClassString1, userClassString2 });
-      
-      const userStudents = await User.find({
-        role: 'student',
-        department,
-        $or: [
-          { class: userClassString1 }, // New format
-          { class: userClassString2 }   // Old format
-        ],
-        createdBy: currentUser._id, // Only show students created by this faculty
-        status: 'active'
-      }).select('name email phone profileImage class').sort({ name: 1 });
-
-      console.log('📊 Found user students:', userStudents.length);
-      console.log('📊 User students class formats:', userStudents.map(u => ({ name: u.name, class: u.class })));
-
-      // Convert User records to Student-like format
-      students = userStudents.map((user, index) => ({
-        _id: user._id,
-        rollNumber: `STU${String(index + 1).padStart(3, '0')}`, // Generate roll number
-        name: user.name,
-        email: user.email,
-        mobile: user.phone || 'N/A',
-        userId: user._id,
-        profileImage: user.profileImage,
-        classId: classId, // Add the classId that was generated earlier
-        facultyId: facultyId, // Add the facultyId
-        batch: batch,
-        year: year,
-        semester: `Sem ${semester}`,
-        section: section || 'A'
-      }));
-    }
+    // Do not fall back to the User model. If no Student records match, return empty list to avoid
+    // cross-class leakage when classes are reassigned.
 
     console.log('📊 Found students:', students.length);
     console.log('📊 Student data structure:', students.map(s => ({
@@ -1999,6 +1926,40 @@ router.post('/:id/assign-class', hodAndAbove, [
       assignedBy: currentUser._id,
       notes: `Assigned by HOD ${currentUser.name}`
     });
+
+    // Update students' facultyId to point to the new class advisor's Faculty record
+    // This ensures students are properly associated with the new advisor
+    try {
+      // Build classId to match students
+      const normalizedYear = year;
+      const normalizedSemester = `Sem ${semester}`;
+      const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section}`;
+      
+      // Update students' facultyId for this class
+      const updateResult = await Student.updateMany(
+        {
+          $or: [
+            { classId: classId },
+            {
+              batch: batch,
+              year: normalizedYear,
+              semester: normalizedSemester,
+              section: section,
+              department: currentUser.department
+            }
+          ],
+          status: 'active'
+        },
+        {
+          $set: { facultyId: faculty._id }
+        }
+      );
+      
+      console.log(`✅ Updated ${updateResult.modifiedCount} students' facultyId to new class advisor`);
+    } catch (error) {
+      console.error('⚠️ Error updating students facultyId (non-critical):', error);
+      // Don't fail the request if student update fails - assignment is still created
+    }
 
     res.status(200).json({
       status: 'success',

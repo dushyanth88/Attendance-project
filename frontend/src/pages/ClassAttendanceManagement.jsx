@@ -349,30 +349,30 @@ const ClassAttendanceManagement = () => {
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center">
+          <div className="py-4">
+            <div className="flex items-start gap-4">
               <button
                 onClick={handleBackToDashboard}
-                className="mr-4 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                className="mt-1 p-2 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
                 title="Back to Class Management"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-            <div>
-                <h1 className="text-xl font-semibold text-gray-900">
-                Class Management - {classData.batch} | {classData.year} | Semester {classData.semester} | Section {classData.section}
-              </h1>
-                <p className="text-sm text-gray-500">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl font-semibold text-gray-900 mb-1 break-words">
+                  Class Management - {classData.batch} | {classData.year} | Semester {classData.semester} | Section {classData.section}
+                </h1>
+                <p className="text-sm text-gray-500 mb-1">
                   Manage attendance, students, and generate reports for this class
                 </p>
                 {classData.facultyId ? (
-                  <p className="text-sm text-blue-600 font-medium mt-1">
+                  <p className="text-sm text-blue-600 font-medium">
                     Class Teacher: {classData.facultyId.name || classData.facultyId}
                   </p>
                 ) : (
-                  <p className="text-sm text-blue-600 font-medium mt-1">
+                  <p className="text-sm text-blue-600 font-medium">
                     Class Teacher: {user.name} (Current User)
                   </p>
                 )}
@@ -380,7 +380,7 @@ const ClassAttendanceManagement = () => {
             </div>
           </div>
         </div>
-            </div>
+      </div>
 
       {/* Tab Navigation */}
       <div className="bg-white border-b shadow-sm">
@@ -1549,26 +1549,75 @@ const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, 
       console.log('🔍 Class data:', classData);
       console.log('🔍 Semester conversion:', `${classData.semester} -> Sem ${classData.semester}`);
 
-      const response = await apiFetch({
-        url: '/api/faculty/students',
-        method: 'POST',
-        data: studentPayload
-      });
+//       const response = await apiFetch({
+//         url: '/api/faculty/students',
+//         method: 'POST',
+//         data: studentPayload
+//       });
 
-      if (response.data.success) {
-        onToast('Student added successfully!', 'success');
-        setShowAddStudent(false);
-        // Refresh students list
-        const studentsResponse = await apiFetch({
-          url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
-          method: 'GET'
-        });
-        if (studentsResponse.data.success) {
-          onStudentsUpdate(studentsResponse.data.data.students || []);
-        }
-      } else {
-        onToast(response.data.message || 'Failed to add student', 'error');
+//       // if (response.data.success) {
+//       //   onToast('Student added successfully!', 'success');
+//       //   setShowAddStudent(false);
+//       //   // Refresh students list
+//       //   const studentsResponse = await apiFetch({
+//       //     url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
+//       //     method: 'GET'
+//       //   });
+//       //   if (studentsResponse.data.success) {
+//       //     onStudentsUpdate(studentsResponse.data.data.students || []);
+//       //   }
+//       // } else {
+//       //   onToast(response.data.message || 'Failed to add student', 'error');
+//       // }
+//       //new
+      
+// if (response.data.success) {
+//   showToast('Student added!', 'success');
+//   try {
+//     if (classData.batch && classData.year && classData.semester && classData.department) {
+//       const studentsResponse = await apiFetch({
+//         url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
+//         method: 'GET'
+//       });
+//       if (studentsResponse.data.success) {
+//         onStudentsUpdate(studentsResponse.data.data.students || []);
+//       }
+//     }
+//   } catch (err) {
+//     // Just log, do not show an error toast
+//     console.warn('Failed to reload students after add:', err);
+//   }
+// } else {
+//   showToast('Failed to add student', 'error');
+// }
+
+const response = await apiFetch({
+  url: '/api/faculty/students',
+  method: 'POST',
+  data: studentPayload
+});
+
+if (response.data.success) {
+  onToast('Student added successfully!', 'success');
+  setShowAddStudent(false);
+  try {
+    if (classData.batch && classData.year && classData.semester && classData.section && classData.department) {
+      const studentsResponse = await apiFetch({
+        url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&section=${encodeURIComponent(classData.section)}&department=${encodeURIComponent(user.department)}`,
+        method: 'GET'
+      });
+      if (studentsResponse.data.success) {
+        onStudentsUpdate(studentsResponse.data.data.students || []);
       }
+      // Do NOT show toast if reload fails - student was already added successfully
+    }
+  } catch (err) {
+    // Silently fail reload - student was already added successfully
+    console.warn('Failed to reload students list after add:', err);
+  }
+} else {
+  onToast(response.data.message || 'Failed to add student', 'error');
+}
     } catch (error) {
       console.error('Error adding student:', error);
       console.error('Error response:', error.response?.data);
@@ -1639,15 +1688,35 @@ const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, 
         method: 'DELETE'
       });
 
+      // if (response.data.success) {
+      //   onToast('Student deleted successfully!', 'success');
+      //   // Refresh students list
+      //   const studentsResponse = await apiFetch({
+      //     url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
+      //     method: 'GET'
+      //   });
+      //   if (studentsResponse.data.success) {
+      //     onStudentsUpdate(studentsResponse.data.data.students || []);
+      //   }
+      // } else {
+      //   onToast(response.data.message || 'Failed to delete student', 'error');
+      // }
       if (response.data.success) {
         onToast('Student deleted successfully!', 'success');
-        // Refresh students list
-        const studentsResponse = await apiFetch({
-          url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
-          method: 'GET'
-        });
-        if (studentsResponse.data.success) {
-          onStudentsUpdate(studentsResponse.data.data.students || []);
+        // Reload students, do NOT show toast if the reload fails
+        try {
+          if (classData.batch && classData.year && classData.semester && classData.department) {
+            const studentsResponse = await apiFetch({
+              url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
+              method: 'GET'
+            });
+            if (studentsResponse.data.success) {
+              onStudentsUpdate(studentsResponse.data.data.students || []);
+            }
+          }
+        } catch (error) {
+          // Just log the error, don't show a toast
+          console.warn('Error reloading students after deletion:', error);
         }
       } else {
         onToast(response.data.message || 'Failed to delete student', 'error');
@@ -2371,5 +2440,4 @@ const HolidayManagementTab = ({ onMarkHoliday, onShowHolidayManagement }) => {
     </div>
   );
 };
-
 export default ClassAttendanceManagement;

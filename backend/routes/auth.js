@@ -297,6 +297,68 @@ router.post('/seed', async (req, res) => {
   }
 });
 
+// @desc    Change password (self-service for principal, hod, faculty)
+// @route   PUT /api/auth/change-password
+// @access  Private (principal, hod, faculty)
+router.put('/change-password', authenticate, [
+  body('currentPassword').notEmpty().withMessage('Current password is required'),
+  body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    // Only allow principal, hod, and faculty to change their password
+    const allowedRoles = ['principal', 'hod', 'faculty'];
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        msg: 'You are not authorized to change password'
+      });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        msg: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await user.comparePassword(currentPassword);
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Current password is incorrect'
+      });
+    }
+
+    // Update password (will be hashed by pre-save middleware)
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      msg: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error'
+    });
+  }
+});
+
 // @desc    Create new user (Admin can create any user, HOD can create faculty)
 // @route   POST /api/auth/users/create
 // @access  Private (Admin or HOD)

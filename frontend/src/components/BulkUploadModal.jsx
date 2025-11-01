@@ -388,19 +388,24 @@ const BulkUploadModal = ({ isOpen, onClose, onStudentsAdded, classInfo }) => {
       }, 200);
       
       // Use direct fetch for file uploads as apiFetch might not handle multipart correctly
-      const accessToken = localStorage.getItem('accessToken');
-      const response = await fetch('/api/students/bulk-upload', {
+      // const accessToken = localStorage.getItem('accessToken');
+      // const response = await fetch('/api/students/bulk-upload', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Authorization': `Bearer ${accessToken}`
+      //   },
+      //   body: formData
+      // });
+      const response = await apiFetch({
+        url: '/api/students/bulk-upload',
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: formData
+        data: formData,
+        headers: {} // let apiFetch auto-handle Authorization token
       });
+      const responseData = response.data;
       
-      const responseData = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(responseData.message || `Upload failed with status ${response.status}`);
+      if (!responseData.success) {
+        throw new Error(responseData.message || 'Upload failed');
       }
       
       clearInterval(progressInterval);

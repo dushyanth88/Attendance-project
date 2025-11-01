@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import User from '../models/User.js';
 import Faculty from '../models/Faculty.js';
 import Student from '../models/Student.js';
-import { authenticate, adminOnly, hodAndAbove, facultyAndAbove } from '../middleware/auth.js';
+import { authenticate, adminOnly, hodAndAbove, facultyAndAbove, principalAndAbove } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -919,6 +919,780 @@ router.get('/dashboard', adminOnly, async (req, res) => {
       success: false,
       msg: 'Server error'
     });
+  }
+});
+
+// @desc    Get total HOD count (active by default)
+// @route   GET /api/admin/hod-count
+// @access  Principal and above
+router.get('/hod-count', principalAndAbove, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const filter = { role: 'hod' };
+    if (!includeInactive) {
+      filter.status = 'active';
+    }
+
+    const totalHODs = await User.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      data: { totalHODs, filter }
+    });
+  } catch (error) {
+    console.error('HOD count error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get student counts grouped by department
+// @route   GET /api/admin/student-counts-by-department
+// @access  Principal and above
+router.get('/student-counts-by-department', principalAndAbove, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const matchStage = includeInactive ? {} : { status: 'active' };
+
+    const pipeline = [
+      { $match: matchStage },
+      { $group: { _id: '$department', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } }
+    ];
+
+    const results = await Student.aggregate(pipeline);
+    const formatted = results.map(r => ({ department: r._id || 'Unknown', count: r.count }));
+
+    res.status(200).json({ success: true, data: { departments: formatted, total: formatted.reduce((a,b)=>a+b.count,0) } });
+  } catch (error) {
+    console.error('Student counts by department error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get faculty counts by department
+// @route   GET /api/admin/faculty-counts-by-department
+// @access  Principal and above
+router.get('/faculty-counts-by-department', principalAndAbove, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const matchStage = includeInactive ? {} : { status: 'active' };
+
+    // Aggregate from Faculty model
+    const facultyPipeline = [
+      { $match: matchStage },
+      { $group: { _id: '$department', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } }
+    ];
+
+    const facultyResults = await Faculty.aggregate(facultyPipeline);
+    
+    // Also get from User model with role='faculty' for completeness
+    const userPipeline = [
+      { $match: { role: 'faculty', ...matchStage } },
+      { $group: { _id: '$department', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } }
+    ];
+
+    const userResults = await User.aggregate(userPipeline);
+
+    // Merge results, taking the maximum count from either source for each department
+    const departmentMap = new Map();
+    
+    facultyResults.forEach(r => {
+      const dept = r._id || 'Unknown';
+      departmentMap.set(dept, Math.max(departmentMap.get(dept) || 0, r.count));
+    });
+    
+    userResults.forEach(r => {
+      const dept = r._id || 'Unknown';
+      departmentMap.set(dept, Math.max(departmentMap.get(dept) || 0, r.count));
+    });
+
+    const formatted = Array.from(departmentMap.entries())
+      .map(([department, count]) => ({ department, count }))
+      .sort((a, b) => a.department.localeCompare(b.department));
+
+    const total = formatted.reduce((a, b) => a + b.count, 0);
+
+    res.status(200).json({ 
+      success: true, 
+      data: { 
+        departments: formatted, 
+        total 
+      } 
+    });
+  } catch (error) {
+    console.error('Faculty counts by department error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get faculties grouped by department
+// @route   GET /api/admin/faculties-by-department
+// @access  Principal and above
+router.get('/faculties-by-department', principalAndAbove, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const matchStage = includeInactive ? {} : { status: 'active' };
+
+    // Get all faculties from Faculty model with populated userId to get department if needed
+    const faculties = await Faculty.find(matchStage)
+      .select('-password')
+      .populate('userId', 'department name email')
+      .sort({ department: 1, name: 1 })
+      .lean();
+
+    // Also get from User model with role='faculty'
+    const facultyUsers = await User.find({ role: 'faculty', ...matchStage })
+      .select('-password')
+      .sort({ department: 1, name: 1 })
+      .lean();
+
+    // Combine and deduplicate (prefer Faculty model data if exists)
+    const facultyMap = new Map();
+    
+    // Add faculties from Faculty model
+    faculties.forEach(faculty => {
+      // Get department from faculty record or populated userId
+      const department = faculty.department || faculty.userId?.department;
+      
+      if (!department) {
+        console.warn(`Faculty ${faculty.email || faculty._id} has no department, skipping`);
+        return;
+      }
+
+      const key = faculty.email || faculty.userId?._id?.toString() || faculty._id.toString();
+      if (key) {
+        facultyMap.set(key.toLowerCase(), {
+          id: faculty._id,
+          name: faculty.name,
+          email: faculty.email,
+          department: department,
+          position: faculty.position || 'Faculty',
+          phone: faculty.phone || faculty.mobile,
+          status: faculty.status
+        });
+      }
+    });
+
+    // Add faculty users, only if not already in map
+    facultyUsers.forEach(user => {
+      if (!user.department) {
+        console.warn(`Faculty user ${user.email || user._id} has no department, skipping`);
+        return;
+      }
+
+      const key = user.email || user._id.toString();
+      const normalizedKey = key.toLowerCase();
+      
+      if (!facultyMap.has(normalizedKey)) {
+        facultyMap.set(normalizedKey, {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          department: user.department,
+          position: user.position || 'Faculty',
+          phone: user.phone || user.mobile,
+          status: user.status
+        });
+      } else {
+        // Update existing entry if department is missing
+        const existing = facultyMap.get(normalizedKey);
+        if (!existing.department && user.department) {
+          existing.department = user.department;
+        }
+      }
+    });
+
+    // Group by department
+    const groupedByDepartment = {};
+    facultyMap.forEach(faculty => {
+      const dept = faculty.department || 'Unknown';
+      if (!groupedByDepartment[dept]) {
+        groupedByDepartment[dept] = [];
+      }
+      groupedByDepartment[dept].push(faculty);
+    });
+
+    // Sort faculties within each department by name
+    Object.keys(groupedByDepartment).forEach(dept => {
+      groupedByDepartment[dept].sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    // Convert to array format sorted by department name
+    const departments = Object.keys(groupedByDepartment)
+      .sort()
+      .map(department => ({
+        department,
+        faculties: groupedByDepartment[department],
+        count: groupedByDepartment[department].length
+      }));
+
+    const total = Array.from(facultyMap.values()).length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        departments,
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Faculties by department error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get students grouped by department
+// @route   GET /api/admin/students-by-department
+// @access  Principal and above
+router.get('/students-by-department', principalAndAbove, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const matchStage = includeInactive ? {} : { status: 'active' };
+
+    // Get all students from Student model
+    const students = await Student.find(matchStage)
+      .select('-password')
+      .populate('userId', 'name email department')
+      .sort({ department: 1, batch: 1, year: 1, rollNumber: 1 })
+      .lean();
+
+    // Import ClassAssignment model
+    const ClassAssignment = (await import('../models/ClassAssignment.js')).default;
+
+    // Build a map of class assignments for efficient lookup
+    // Create unique class keys from students: batch_year_semester_section
+    const classKeys = new Set();
+    students.forEach(student => {
+      if (student.batch && student.year && student.semester && student.section) {
+        let semesterNumber = student.semester;
+        if (typeof semesterNumber === 'string' && semesterNumber.startsWith('Sem ')) {
+          semesterNumber = parseInt(semesterNumber.replace('Sem ', ''));
+        } else if (typeof semesterNumber === 'string') {
+          semesterNumber = parseInt(semesterNumber);
+        }
+        if (!isNaN(semesterNumber)) {
+          const classKey = `${student.batch}_${student.year}_${semesterNumber}_${student.section}`;
+          classKeys.add(classKey);
+        }
+      }
+    });
+
+    // Fetch all active class assignments for these classes
+    const classAssignmentsArray = Array.from(classKeys).map(key => {
+      const [batch, year, semester, section] = key.split('_');
+      return { batch, year, semester: parseInt(semester), section };
+    });
+
+    const classAssignments = await ClassAssignment.find({
+      $or: classAssignmentsArray,
+      active: true
+    })
+      .populate('facultyId', 'name email position')
+      .lean();
+
+    // Create a map: classKey -> classAssignment
+    const assignmentMap = new Map();
+    classAssignments.forEach(assignment => {
+      const classKey = `${assignment.batch}_${assignment.year}_${assignment.semester}_${assignment.section}`;
+      assignmentMap.set(classKey, assignment);
+    });
+
+    // Get all unique faculty user IDs to fetch their Faculty records
+    const facultyUserIds = [...new Set(classAssignments
+      .filter(ca => ca.facultyId?._id)
+      .map(ca => ca.facultyId._id.toString())
+    )];
+
+    const facultyRecords = await Faculty.find({
+      userId: { $in: facultyUserIds }
+    })
+      .select('name position email department userId')
+      .lean();
+
+    // Create a map: userId -> Faculty record
+    const facultyMap = new Map();
+    facultyRecords.forEach(faculty => {
+      const userId = faculty.userId?.toString();
+      if (userId) {
+        facultyMap.set(userId, faculty);
+      }
+    });
+
+    // Group by department and format students with class teacher info
+    const groupedByDepartment = {};
+    
+    students.forEach(student => {
+      // Get department from student record or populated userId
+      const department = student.department || student.userId?.department || 'Unknown';
+      
+      if (!groupedByDepartment[department]) {
+        groupedByDepartment[department] = [];
+      }
+
+      // Get the current class advisor for this student's class
+      let classTeacher = null;
+      
+      if (student.batch && student.year && student.semester && student.section) {
+        // Normalize semester - handle both "Sem X" format and numeric
+        let semesterNumber = student.semester;
+        if (typeof semesterNumber === 'string' && semesterNumber.startsWith('Sem ')) {
+          semesterNumber = parseInt(semesterNumber.replace('Sem ', ''));
+        } else if (typeof semesterNumber === 'string') {
+          semesterNumber = parseInt(semesterNumber);
+        }
+
+        if (!isNaN(semesterNumber)) {
+          const classKey = `${student.batch}_${student.year}_${semesterNumber}_${student.section}`;
+          const classAssignment = assignmentMap.get(classKey);
+
+          if (classAssignment && classAssignment.facultyId) {
+            const facultyUserId = classAssignment.facultyId._id?.toString();
+            const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
+
+            if (advisorFaculty) {
+              classTeacher = {
+                id: advisorFaculty._id,
+                name: advisorFaculty.name,
+                position: advisorFaculty.position || 'Faculty',
+                email: advisorFaculty.email || classAssignment.facultyId.email
+              };
+            } else if (classAssignment.facultyId) {
+              // Fallback to User info if Faculty record not found
+              classTeacher = {
+                name: classAssignment.facultyId.name || 'Unknown',
+                position: classAssignment.facultyId.position || 'Faculty',
+                email: classAssignment.facultyId.email
+              };
+            }
+          }
+        }
+      }
+
+      groupedByDepartment[department].push({
+        id: student._id,
+        rollNumber: student.rollNumber,
+        name: student.name,
+        email: student.email || student.userId?.email,
+        batch: student.batch,
+        year: student.year,
+        semester: student.semester,
+        section: student.section,
+        department: department,
+        mobile: student.mobile || student.phone,
+        parentContact: student.parentContact,
+        classTeacher: classTeacher,
+        status: student.status
+      });
+    });
+
+    // Sort students within each department by batch, year, then roll number
+    Object.keys(groupedByDepartment).forEach(dept => {
+      groupedByDepartment[dept].sort((a, b) => {
+        // First by batch
+        if (a.batch !== b.batch) {
+          return (a.batch || '').localeCompare(b.batch || '');
+        }
+        // Then by year
+        if (a.year !== b.year) {
+          return (a.year || '').localeCompare(b.year || '');
+        }
+        // Finally by roll number
+        return (a.rollNumber || '').localeCompare(b.rollNumber || '');
+      });
+    });
+
+    // Convert to array format sorted by department name
+    const departments = Object.keys(groupedByDepartment)
+      .sort()
+      .map(department => ({
+        department,
+        students: groupedByDepartment[department],
+        count: groupedByDepartment[department].length
+      }));
+
+    const total = students.length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        departments,
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Students by department error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    List HOD users
+// @route   GET /api/admin/hods
+// @access  Principal and above
+router.get('/hods', principalAndAbove, async (req, res) => {
+  try {
+    const { department, includeInactive } = req.query;
+    const filter = { role: 'hod' };
+    if (department) filter.department = department;
+    if (includeInactive !== 'true') filter.status = 'active';
+
+    const hods = await User.find(filter).select('-password').sort({ createdAt: -1 });
+    const total = await User.countDocuments(filter);
+
+    res.status(200).json({ success: true, data: { hods, total } });
+  } catch (error) {
+    console.error('List HODs error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Create a HOD user
+// @route   POST /api/admin/hods
+// @access  Principal and above
+router.post('/hods', principalAndAbove, [
+  body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('department').trim().isLength({ min: 2 }).withMessage('Department is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, msg: 'Validation failed', errors: errors.array() });
+    }
+
+    const { name, email, password, department } = req.body;
+
+    const existing = await User.findOne({ email: email.toLowerCase() });
+    if (existing) {
+      return res.status(400).json({ success: false, msg: 'User with this email already exists' });
+    }
+
+    // Check if a HOD already exists for this department
+    const existingHod = await User.findOne({ role: 'hod', department });
+    if (existingHod) {
+      return res.status(400).json({ success: false, msg: 'A HOD already exists for this department' });
+    }
+
+    const user = new User({
+      name,
+      email: email.toLowerCase(),
+      password,
+      role: 'hod',
+      department,
+      status: 'active',
+      createdBy: req.user._id
+    });
+
+    await user.save();
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    res.status(201).json({ success: true, msg: 'HOD created successfully', data: userObj });
+  } catch (error) {
+    console.error('Create HOD error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Remove a HOD user
+// @route   DELETE /api/admin/hods/:id
+// @access  Principal and above
+router.delete('/hods/:id', principalAndAbove, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ success: false, msg: 'User not found' });
+    }
+    if (user.role !== 'hod') {
+      return res.status(400).json({ success: false, msg: 'User is not a HOD' });
+    }
+
+    await User.findByIdAndDelete(user._id);
+    res.status(200).json({ success: true, msg: 'HOD removed successfully' });
+  } catch (error) {
+    console.error('Remove HOD error:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get overall (all departments/classes) daily attendance stats
+// @route   GET /api/admin/overall-daily-attendance
+// @access  Principal and above
+router.get('/overall-daily-attendance', principalAndAbove, async (req, res) => {
+  try {
+    const Student = (await import('../models/Student.js')).default;
+    const Attendance = (await import('../models/Attendance.js')).default;
+    const today = new Date().toISOString().split('T')[0];
+    // Get all active students
+    const students = await Student.find({ status: 'active' });
+    const userIds = students.map(s => s.userId.toString()); // MATCH ON userId not _id
+    // Get today's attendance for all students, match studentId -> User _id
+    const attendanceRecords = await Attendance.find({ date: today, studentId: { $in: userIds } });
+    const presentStudents = attendanceRecords.filter(r => r.status === 'Present').length;
+    const absentStudents = attendanceRecords.filter(r => r.status === 'Absent').length;
+    const totalStudents = students.length;
+    const notMarkedStudents = totalStudents - (presentStudents + absentStudents);
+    const attendancePercentage = totalStudents > 0 ? Math.round((presentStudents / totalStudents) * 100) : 0;
+    res.json({
+      success: true,
+      data: {
+        totalStudents,
+        presentStudents,
+        absentStudents,
+        notMarkedStudents,
+        attendancePercentage,
+        date: today,
+        lastUpdated: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching overall daily attendance:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get attendance percentage by department
+// @route   GET /api/admin/attendance-by-department
+// @access  Principal and above
+router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
+  try {
+    const Student = (await import('../models/Student.js')).default;
+    const Attendance = (await import('../models/Attendance.js')).default;
+    const today = new Date().toISOString().split('T')[0];
+
+    // Get all departments
+    const departments = await Student.distinct('department');
+    
+    // Get all active students grouped by department
+    const studentsByDept = await Student.find({ status: 'active' })
+      .select('department userId')
+      .lean();
+
+    // Get today's attendance records
+    const userIds = studentsByDept.map(s => s.userId?.toString()).filter(Boolean);
+    const attendanceRecords = await Attendance.find({ 
+      date: today, 
+      studentId: { $in: userIds } 
+    }).lean();
+
+    // Create a map of studentId to attendance status
+    const attendanceMap = new Map();
+    attendanceRecords.forEach(record => {
+      attendanceMap.set(record.studentId?.toString(), record.status);
+    });
+
+    // Calculate stats for each department
+    const departmentStats = [];
+    
+    for (const dept of departments) {
+      if (!dept) continue;
+
+      const deptStudents = studentsByDept.filter(s => s.department === dept);
+      const deptStudentIds = deptStudents.map(s => s.userId?.toString()).filter(Boolean);
+      
+      let presentCount = 0;
+      let absentCount = 0;
+      let notMarkedCount = 0;
+
+      deptStudentIds.forEach(studentId => {
+        const status = attendanceMap.get(studentId);
+        if (status === 'Present') {
+          presentCount++;
+        } else if (status === 'Absent') {
+          absentCount++;
+        } else {
+          notMarkedCount++;
+        }
+      });
+
+      const totalStudents = deptStudents.length;
+      const attendancePercentage = totalStudents > 0 
+        ? Math.round((presentCount / totalStudents) * 100) 
+        : 0;
+
+      departmentStats.push({
+        department: dept,
+        totalStudents,
+        presentStudents: presentCount,
+        absentStudents: absentCount,
+        notMarkedStudents: notMarkedCount,
+        attendancePercentage,
+        date: today
+      });
+    }
+
+    // Sort by attendance percentage (descending)
+    departmentStats.sort((a, b) => b.attendancePercentage - a.attendancePercentage);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        departments: departmentStats,
+        date: today,
+        lastUpdated: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching attendance by department:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+// @desc    Get students in HOD's department
+// @route   GET /api/admin/department-students
+// @access  HOD and above
+router.get('/department-students', hodAndAbove, async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const department = currentUser.department;
+    const includeInactive = req.query.includeInactive === 'true';
+    const matchStage = includeInactive ? {} : { status: 'active' };
+
+    // Get all students from HOD's department
+    const students = await Student.find({ 
+      department: department,
+      ...matchStage 
+    })
+      .select('-password')
+      .populate('userId', 'name email department')
+      .sort({ batch: 1, year: 1, rollNumber: 1 })
+      .lean();
+
+    // Import ClassAssignment model
+    const ClassAssignment = (await import('../models/ClassAssignment.js')).default;
+
+    // Build a map of class assignments for efficient lookup
+    // Create unique class keys from students: batch_year_semester_section
+    const classKeys = new Set();
+    students.forEach(student => {
+      if (student.batch && student.year && student.semester && student.section) {
+        let semesterNumber = student.semester;
+        if (typeof semesterNumber === 'string' && semesterNumber.startsWith('Sem ')) {
+          semesterNumber = parseInt(semesterNumber.replace('Sem ', ''));
+        } else if (typeof semesterNumber === 'string') {
+          semesterNumber = parseInt(semesterNumber);
+        }
+        if (!isNaN(semesterNumber)) {
+          const classKey = `${student.batch}_${student.year}_${semesterNumber}_${student.section}`;
+          classKeys.add(classKey);
+        }
+      }
+    });
+
+    // Fetch all active class assignments for these classes
+    const classAssignmentsArray = Array.from(classKeys).map(key => {
+      const [batch, year, semester, section] = key.split('_');
+      return { batch, year, semester: parseInt(semester), section };
+    });
+
+    const classAssignments = await ClassAssignment.find({
+      $or: classAssignmentsArray,
+      active: true
+    })
+      .populate('facultyId', 'name email position')
+      .lean();
+
+    // Create a map: classKey -> classAssignment
+    const assignmentMap = new Map();
+    classAssignments.forEach(assignment => {
+      const classKey = `${assignment.batch}_${assignment.year}_${assignment.semester}_${assignment.section}`;
+      assignmentMap.set(classKey, assignment);
+    });
+
+    // Get all unique faculty user IDs to fetch their Faculty records
+    const facultyUserIds = [...new Set(classAssignments
+      .filter(ca => ca.facultyId?._id)
+      .map(ca => ca.facultyId._id.toString())
+    )];
+
+    const facultyRecords = await Faculty.find({
+      userId: { $in: facultyUserIds }
+    })
+      .select('name position email department userId')
+      .lean();
+
+    // Create a map: userId -> Faculty record
+    const facultyMap = new Map();
+    facultyRecords.forEach(faculty => {
+      const userId = faculty.userId?.toString();
+      if (userId) {
+        facultyMap.set(userId, faculty);
+      }
+    });
+
+    // Format students with class teacher info (current class advisor)
+    const formattedStudents = students.map(student => {
+      // Get the current class advisor for this student's class
+      let classTeacher = null;
+      
+      if (student.batch && student.year && student.semester && student.section) {
+        // Normalize semester - handle both "Sem X" format and numeric
+        let semesterNumber = student.semester;
+        if (typeof semesterNumber === 'string' && semesterNumber.startsWith('Sem ')) {
+          semesterNumber = parseInt(semesterNumber.replace('Sem ', ''));
+        } else if (typeof semesterNumber === 'string') {
+          semesterNumber = parseInt(semesterNumber);
+        }
+
+        if (!isNaN(semesterNumber)) {
+          const classKey = `${student.batch}_${student.year}_${semesterNumber}_${student.section}`;
+          const classAssignment = assignmentMap.get(classKey);
+
+          if (classAssignment && classAssignment.facultyId) {
+            const facultyUserId = classAssignment.facultyId._id?.toString();
+            const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
+
+            if (advisorFaculty) {
+              classTeacher = {
+                id: advisorFaculty._id,
+                name: advisorFaculty.name,
+                position: advisorFaculty.position || 'Faculty',
+                email: advisorFaculty.email || classAssignment.facultyId.email
+              };
+            } else if (classAssignment.facultyId) {
+              // Fallback to User info if Faculty record not found
+              classTeacher = {
+                name: classAssignment.facultyId.name || 'Unknown',
+                position: classAssignment.facultyId.position || 'Faculty',
+                email: classAssignment.facultyId.email
+              };
+            }
+          }
+        }
+      }
+
+      return {
+        id: student._id,
+        rollNumber: student.rollNumber,
+        name: student.name,
+        email: student.email || student.userId?.email,
+        batch: student.batch,
+        year: student.year,
+        semester: student.semester,
+        section: student.section,
+        department: department,
+        mobile: student.mobile || student.phone,
+        parentContact: student.parentContact,
+        classTeacher: classTeacher,
+        status: student.status
+      };
+    });
+
+    const total = formattedStudents.length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        department,
+        students: formattedStudents,
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching department students:', error);
+    res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
 

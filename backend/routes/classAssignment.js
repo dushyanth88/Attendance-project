@@ -106,6 +106,45 @@ router.post('/', [
       notes
     });
 
+    // Update students' facultyId to point to the new class advisor's Faculty record
+    // This ensures students are properly associated with the new advisor
+    try {
+      const Student = (await import('../models/Student.js')).default;
+      const newFacultyRecord = await Faculty.findOne({ userId: facultyUser._id });
+      
+      if (newFacultyRecord) {
+        // Build classId to match students
+        const normalizedYear = year;
+        const normalizedSemester = `Sem ${semester}`;
+        const classId = `${batch}_${normalizedYear}_${normalizedSemester}_${section}`;
+        
+        // Update students' facultyId for this class
+        const updateResult = await Student.updateMany(
+          {
+            $or: [
+              { classId: classId },
+              {
+                batch: batch,
+                year: normalizedYear,
+                semester: normalizedSemester,
+                section: section,
+                department: currentUser.department
+              }
+            ],
+            status: 'active'
+          },
+          {
+            $set: { facultyId: newFacultyRecord._id }
+          }
+        );
+        
+        console.log(`✅ Updated ${updateResult.modifiedCount} students' facultyId to new class advisor`);
+      }
+    } catch (error) {
+      console.error('⚠️ Error updating students facultyId (non-critical):', error);
+      // Don't fail the request if student update fails - assignment is still created
+    }
+
     // Populate the assignment with faculty details
     await assignment.populate([
       { path: 'facultyId', select: 'name email position' },

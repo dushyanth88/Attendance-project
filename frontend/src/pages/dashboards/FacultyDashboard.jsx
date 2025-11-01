@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../utils/apiFetch';
+import TeamFooter from '../../components/TeamFooter';
+import PasswordResetModal from '../../components/PasswordResetModal';
 
 const FacultyDashboard = () => {
   const { user, logout } = useAuth();
@@ -11,6 +13,7 @@ const FacultyDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [studentAttendance, setStudentAttendance] = useState({});
   const [expandedClasses, setExpandedClasses] = useState(new Set());
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
   useEffect(() => {
     fetchFacultyDashboard();
@@ -169,13 +172,21 @@ const FacultyDashboard = () => {
               </div>
             </div>
 
-            {/* Logout Button - Right Side */}
-            <button
-              onClick={handleLogout}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
-            >
-              Logout
-            </button>
+            {/* Action Buttons - Right Side */}
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowPasswordResetModal(true)}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Change Password
+              </button>
+              <button
+                onClick={handleLogout}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </nav>
@@ -370,6 +381,14 @@ const FacultyDashboard = () => {
           </div>
         </div>
       </main>
+
+      {/* Password Reset Modal */}
+      <PasswordResetModal 
+        isOpen={showPasswordResetModal} 
+        onClose={() => setShowPasswordResetModal(false)} 
+      />
+
+      <TeamFooter />
     </div>
   );
 };

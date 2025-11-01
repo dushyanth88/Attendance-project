@@ -149,7 +149,7 @@ studentSchema.index(
   { classId: 1, userId: 1 },
   {
     unique: true,
-    partialFilterExpression: { classId: { $exists: true, $ne: null }, status: 'active' },
+    partialFilterExpression: { classId: { $exists: true }, status: 'active' },
     name: 'unique_student_per_class'
   }
 );
@@ -158,7 +158,7 @@ studentSchema.index(
   { classId: 1, rollNumber: 1 },
   {
     unique: true,
-    partialFilterExpression: { classId: { $exists: true, $ne: null }, status: 'active' },
+    partialFilterExpression: { classId: { $exists: true }, status: 'active' },
     name: 'unique_rollnumber_per_class'
   }
 );

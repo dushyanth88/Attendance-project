@@ -116,22 +116,14 @@ router.get('/', authenticate, facultyAndAbove, async (req, res) => {
       department: faculty.department
     });
     
-    // Build comprehensive query with faculty-class binding integrity
-    // First try with classId, then fallback to individual fields
-    let query = {
-      batch,
-      year: normalizedYear,
-      semester: normalizedSemester,
-      department: req.user.department,
-      facultyId: faculty._id, // Only show students created by this faculty
-      ...(section ? { section } : {}), // Add section filter if provided
-      status: 'active' // Exclude soft-deleted students
-    };
-    
+    // Build comprehensive query - fetch students by class details, not by facultyId
+    // This allows new class advisors to see existing students when reassigned
     // Try to find students with classId first
     let students = await Student.find({
-      ...query,
-      classId: classId
+      classId: classId,
+      department: req.user.department,
+      ...(section ? { section } : {}), // Add section filter if provided
+      status: 'active' // Exclude soft-deleted students
     })
       .select('userId rollNumber name email mobile year semester batch department classId facultyId createdBy createdAt')
       .sort({ rollNumber: 1 });
@@ -139,14 +131,19 @@ router.get('/', authenticate, facultyAndAbove, async (req, res) => {
     // If no students found with classId, try without classId filter (for backward compatibility)
     if (students.length === 0) {
       console.log('⚠️ No students found with classId, trying without classId filter...');
-      students = await Student.find(query)
+      students = await Student.find({
+        batch,
+        year: normalizedYear,
+        semester: normalizedSemester,
+        department: req.user.department,
+        ...(section ? { section } : {}), // Add section filter if provided
+        status: 'active' // Exclude soft-deleted students
+      })
         .select('userId rollNumber name email mobile year semester batch department classId facultyId createdBy createdAt')
         .sort({ rollNumber: 1 });
     }
     
-    console.log('🔍 Final query:', JSON.stringify(query, null, 2));
-
-    console.log(`📊 Found ${students.length} students for class ${classId}`);
+    console.log(`📊 Found ${students.length} students for class ${classId} (fetched by class assignment, not facultyId)`);
     
     if (students.length > 0) {
       console.log('📋 Sample students found:');

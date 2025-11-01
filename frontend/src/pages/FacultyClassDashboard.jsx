@@ -7,6 +7,7 @@ import AttendanceHistory from './AttendanceHistory';
 import StudentManagement from './StudentManagement';
 import ReportGenerator from './ReportGenerator';
 import Toast from '../components/Toast';
+import TeamFooter from '../components/TeamFooter';
 
 const FacultyClassDashboard = () => {
   const { user } = useAuth();
@@ -199,6 +200,7 @@ const FacultyClassDashboard = () => {
           )}
         </main>
       </div>
+      <TeamFooter />
     </>
   );
 };

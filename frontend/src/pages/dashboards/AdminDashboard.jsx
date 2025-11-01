@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import CreateUserModal from '../../components/CreateUserModal';
 import FacultyList from '../../components/FacultyList';
+import TeamFooter from '../../components/TeamFooter';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -163,6 +164,7 @@ const AdminDashboard = () => {
           />
         </div>
       </main>
+      <TeamFooter />
 
       {/* Create User Modal */}
       <CreateUserModal

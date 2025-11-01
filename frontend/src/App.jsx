@@ -10,12 +10,16 @@ import FacultyDashboard from './pages/dashboards/FacultyDashboard';
 import ClassAttendanceManagement from './pages/ClassAttendanceManagement';
 import StudentDashboard from './pages/dashboards/StudentDashboard';
 import ClassManagementPage from './pages/ClassManagementPage';
+import StudentsByDepartment from './pages/dashboards/StudentsByDepartment';
+import DepartmentAttendance from './pages/dashboards/DepartmentAttendance';
+import HODStudents from './pages/dashboards/HODStudents';
 import ClassSelectionPage from './pages/ClassSelectionPage';
 import AssignedBatchesPage from './pages/AssignedBatchesPage';
 import StudentManagementPage from './pages/StudentManagementPage';
 import EnhancedStudentProfile from './components/EnhancedStudentProfile';
 import StudentProfile from './components/StudentProfile';
 import ReportGeneration from './components/ReportGeneration';
+import TeamFooter from './components/TeamFooter';
 import './App.css';
 
 // Wrapper component to add unique keys to routes
@@ -24,7 +28,7 @@ const AppRoutes = () => {
   
   return (
     <Routes location={location} key={location.pathname}>
-            {/* Public Routes */}
+            Public Routes
             <Route path="/login" element={<Login />} />
             
             {/* Protected Routes */}
@@ -45,10 +49,34 @@ const AppRoutes = () => {
               } 
             />
             <Route 
+              path="/principal/students-by-department" 
+              element={
+                <ProtectedRoute allowedRoles={['principal']}>
+                  <StudentsByDepartment />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/principal/department-attendance" 
+              element={
+                <ProtectedRoute allowedRoles={['principal']}>
+                  <DepartmentAttendance />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
               path="/hod/dashboard" 
               element={
                 <ProtectedRoute allowedRoles={['hod']}>
                   <HODDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/hod/students" 
+              element={
+                <ProtectedRoute allowedRoles={['hod']}>
+                  <HODStudents />
                 </ProtectedRoute>
               } 
             />
@@ -141,7 +169,7 @@ const AppRoutes = () => {
               } 
             />
             
-            {/* Default redirect */}
+            {/* Default routes redirect to login */}
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
@@ -155,6 +183,7 @@ function App() {
         <ScrollToTop />
         <div className="App">
           <AppRoutes />
+          <TeamFooter />
         </div>
       </Router>
     </AuthProvider>

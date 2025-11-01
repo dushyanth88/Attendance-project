@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Toast from '../components/Toast';
 import { apiFetch } from '../utils/apiFetch';
+import TeamFooter from '../components/TeamFooter';
+import PasswordResetModal from '../components/PasswordResetModal';
 
 const ClassManagementPage = () => {
   const { user, logout } = useAuth();
@@ -14,6 +16,7 @@ const ClassManagementPage = () => {
   const [profileImage, setProfileImage] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
   // Fetch faculty profile and assigned classes
   useEffect(() => {
@@ -267,13 +270,21 @@ const ClassManagementPage = () => {
               </div>
             </div>
 
-            {/* Logout Button - Right Side */}
-            <button
-              onClick={handleLogout}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
-            >
-              Logout
-            </button>
+            {/* Action Buttons - Right Side */}
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowPasswordResetModal(true)}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Change Password
+              </button>
+              <button
+                onClick={handleLogout}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </nav>
@@ -445,6 +456,14 @@ const ClassManagementPage = () => {
           onClose={() => setToast({ show: false, message: '', type: 'success' })}
         />
       )}
+
+      {/* Password Reset Modal */}
+      <PasswordResetModal 
+        isOpen={showPasswordResetModal} 
+        onClose={() => setShowPasswordResetModal(false)} 
+      />
+
+      <TeamFooter />
     </div>
   );
 };

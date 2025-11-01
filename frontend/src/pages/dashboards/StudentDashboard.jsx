@@ -1,6 +1,7 @@
 import { useAuth } from '../../context/AuthContext';
 import { useEffect, useState } from 'react';
 import ReasonSubmissionModal from '../../components/ReasonSubmissionModal';
+import TeamFooter from '../../components/TeamFooter';
 
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
@@ -787,6 +788,7 @@ const StudentDashboard = () => {
           </div>
         </div>
       )}
+      <TeamFooter />
     </div>
   );
 };

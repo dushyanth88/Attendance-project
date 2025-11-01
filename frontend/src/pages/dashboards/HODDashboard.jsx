@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import CreateUserModal from '../../components/CreateUserModal';
 import FacultyList from '../../components/FacultyList';
@@ -6,9 +7,12 @@ import HolidayModal from '../../components/HolidayModal';
 import HolidayManagement from '../../components/HolidayManagement';
 import { apiFetch } from '../../utils/apiFetch';
 import Toast from '../../components/Toast';
+import TeamFooter from '../../components/TeamFooter';
+import PasswordResetModal from '../../components/PasswordResetModal';
 
 const HODDashboard = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [showCreateFacultyModal, setShowCreateFacultyModal] = useState(false);
   const [facultyRefreshTrigger, setFacultyRefreshTrigger] = useState(0);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
@@ -31,6 +35,7 @@ const HODDashboard = () => {
     date: '',
     loading: true
   });
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
 
   const handleFacultyCreated = () => {
     setFacultyRefreshTrigger(prev => prev + 1);
@@ -266,12 +271,26 @@ const HODDashboard = () => {
                 </p>
               </div>
             </div>
-            <button
-              onClick={logout}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
-            >
-              Logout
-            </button>
+            <div className="flex space-x-3">
+              <button
+                onClick={() => navigate('/hod/students')}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                View Students
+              </button>
+              <button
+                onClick={() => setShowPasswordResetModal(true)}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Change Password
+              </button>
+              <button
+                onClick={logout}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -524,6 +543,14 @@ const HODDashboard = () => {
           onClose={() => setToast({ show: false, message: '', type: 'success' })}
         />
       )}
+
+      {/* Password Reset Modal */}
+      <PasswordResetModal 
+        isOpen={showPasswordResetModal} 
+        onClose={() => setShowPasswordResetModal(false)} 
+      />
+
+      <TeamFooter />
     </div>
   );
 };
