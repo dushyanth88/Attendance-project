@@ -12,6 +12,7 @@ const StudentDashboard = () => {
   const [rollNumber, setRollNumber] = useState(null);
   const [presentDays, setPresentDays] = useState(0);
   const [absentDays, setAbsentDays] = useState(0);
+  const [odDays, setOdDays] = useState(0);
   const [totalWorkingDays, setTotalWorkingDays] = useState(0);
   const [showReasonModal, setShowReasonModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -153,11 +154,15 @@ const StudentDashboard = () => {
           setRollNumber(data.roll_number || null);
           
           // Calculate actual attendance statistics
+          // OD students are counted as Present for calculations
+          const presentCountWithOD = data.attendance.filter(record => record.status === 'Present' || record.status === 'OD').length;
+          const odCount = data.attendance.filter(record => record.status === 'OD').length;
           const presentCount = data.attendance.filter(record => record.status === 'Present').length;
           const absentCount = data.attendance.filter(record => record.status === 'Absent').length;
-          const totalCount = presentCount + absentCount;
+          const totalCount = presentCountWithOD + absentCount;
           
           setPresentDays(presentCount);
+          setOdDays(odCount);
           setAbsentDays(absentCount);
           setTotalWorkingDays(totalCount);
           
@@ -234,16 +239,20 @@ const StudentDashboard = () => {
           }
           
           // Recalculate statistics with updated data
+          // OD is counted as Present for calculations
+          const presentCountWithOD = next.filter(record => record.status === 'Present' || record.status === 'OD').length;
+          const odCount = next.filter(record => record.status === 'OD').length;
           const presentCount = next.filter(record => record.status === 'Present').length;
           const absentCount = next.filter(record => record.status === 'Absent').length;
-          const totalCount = presentCount + absentCount;
+          const totalCount = presentCountWithOD + absentCount;
           
           setPresentDays(presentCount);
+          setOdDays(odCount);
           setAbsentDays(absentCount);
           setTotalWorkingDays(totalCount);
           
-          // Update overall percentage
-          const newPercentage = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+          // Update overall percentage (OD counted as Present)
+          const newPercentage = totalCount > 0 ? Math.round((presentCountWithOD / totalCount) * 100) : 0;
           setOverall(`${newPercentage}%`);
           
           return next;
@@ -375,6 +384,17 @@ const StudentDashboard = () => {
               </div>
             </div>
           </div>
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 hover:shadow-xl transition-all duration-300">
+            <div className="flex items-center">
+              <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-3 rounded-xl mr-3 shadow-lg">
+                <span className="text-2xl">📋</span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 font-medium">OD Days</p>
+                <p className="text-2xl font-bold text-gray-800">{odDays}</p>
+              </div>
+            </div>
+          </div>
           <div className="bg-gradient-to-br from-white to-red-50 rounded-2xl shadow-lg border border-red-100 p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
               <div className="bg-gradient-to-br from-red-500 to-pink-600 p-3 rounded-xl mr-3 shadow-lg">
@@ -469,6 +489,7 @@ const StudentDashboard = () => {
             </div>
             <div className={`p-4 rounded-lg ${
               todayStatus === 'Present' ? 'bg-green-50 border-l-4 border-green-500' : 
+              todayStatus === 'OD' ? 'bg-blue-50 border-l-4 border-blue-500' :
               todayStatus === 'Absent' ? 'bg-red-50 border-l-4 border-red-500' : 
               todayStatus === 'Not Marked' ? 'bg-yellow-50 border-l-4 border-yellow-500' : 
               'bg-gray-50 border'
@@ -476,10 +497,14 @@ const StudentDashboard = () => {
               <p className="font-medium">
                 {todayStatus === '-' ? 'No record for today' : 
                  todayStatus === 'Not Marked' ? '❔ Not Marked' : 
+                 todayStatus === 'OD' ? '📋 OD (On Duty)' :
                  todayStatus}
               </p>
               {todayStatus === 'Not Marked' && (
                 <p className="text-sm text-yellow-700 mt-1">Attendance not yet recorded by faculty</p>
+              )}
+              {todayStatus === 'OD' && (
+                <p className="text-sm text-blue-700 mt-1">Marked as On Duty - counted as Present</p>
               )}
             </div>
           </div>
@@ -508,11 +533,14 @@ const StudentDashboard = () => {
                   <div className="flex items-center space-x-2">
                     <span className={`${
                       rec.status === 'Present' ? 'text-green-600' : 
+                      rec.status === 'OD' ? 'text-blue-600' :
                       rec.status === 'Absent' ? 'text-red-600' : 
                       rec.status === 'Not Marked' ? 'text-yellow-600' : 
                       'text-gray-600'
                     } font-semibold`}>
-                      {rec.status === 'Not Marked' ? '❔ Not Marked' : rec.status}
+                      {rec.status === 'Not Marked' ? '❔ Not Marked' : 
+                       rec.status === 'OD' ? '📋 OD' :
+                       rec.status}
                     </span>
                     {rec.status === 'Absent' && !rec.reason && (
                       <button
@@ -692,7 +720,7 @@ const StudentDashboard = () => {
             
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
               {/* Report Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-blue-50 rounded-lg p-4">
                   <div className="flex items-center">
                     <span className="text-2xl mr-2">📅</span>
@@ -709,6 +737,17 @@ const StudentDashboard = () => {
                       <p className="text-sm text-gray-600">Present Days</p>
                       <p className="text-2xl font-bold text-green-600">
                         {filteredHistory.filter(record => record.status === 'Present').length}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <span className="text-2xl mr-2">📋</span>
+                    <div>
+                      <p className="text-sm text-gray-600">OD Days</p>
+                      <p className="text-2xl font-bold text-blue-600">
+                        {filteredHistory.filter(record => record.status === 'OD').length}
                       </p>
                     </div>
                   </div>
@@ -772,11 +811,14 @@ const StudentDashboard = () => {
                         <div className="flex items-center space-x-2">
                           <span className={`${
                             record.status === 'Present' ? 'text-green-600' : 
+                            record.status === 'OD' ? 'text-blue-600' :
                             record.status === 'Absent' ? 'text-red-600' : 
                             record.status === 'Not Marked' ? 'text-yellow-600' : 
                             'text-gray-600'
                           } font-semibold`}>
-                            {record.status === 'Not Marked' ? '❔ Not Marked' : record.status}
+                            {record.status === 'Not Marked' ? '❔ Not Marked' : 
+                             record.status === 'OD' ? '📋 OD' :
+                             record.status}
                           </span>
                         </div>
                       </div>

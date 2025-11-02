@@ -55,6 +55,8 @@ const EnhancedStudentProfile = () => {
       });
       
       if (res.data) {
+        console.log('📊 Attendance data received:', res.data);
+        console.log('📋 OD Days value:', res.data.odDays);
         setAttendance(res.data);
         setCurrentPage(page);
       }
@@ -352,30 +354,36 @@ const EnhancedStudentProfile = () => {
               ) : attendance ? (
                 <div className="space-y-6">
                   {/* Statistics Cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div className="bg-green-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-green-600">
-                        ✅ {attendance.presentDays}
+                        ✅ {attendance.presentDays || 0}
                       </div>
                       <div className="text-sm text-green-700">Days Present</div>
                     </div>
+                    <div className="bg-blue-50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-blue-600">
+                        📋 {attendance.odDays || 0}
+                      </div>
+                      <div className="text-sm text-blue-700">OD Days</div>
+                    </div>
                     <div className="bg-red-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-red-600">
-                        ❌ {attendance.absentDays}
+                        ❌ {attendance.absentDays || 0}
                       </div>
                       <div className="text-sm text-red-700">Days Absent</div>
                     </div>
-                    <div className="bg-blue-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        📅 {attendance.totalWorkingDays}
-                      </div>
-                      <div className="text-sm text-blue-700">Total Working Days</div>
-                    </div>
                     <div className="bg-purple-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-purple-600">
-                        📊 {attendance.attendancePercentage}%
+                        📅 {attendance.totalWorkingDays || 0}
                       </div>
-                      <div className="text-sm text-purple-700">Attendance %</div>
+                      <div className="text-sm text-purple-700">Total Days</div>
+                    </div>
+                    <div className="bg-indigo-50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-indigo-600">
+                        📊 {attendance.attendancePercentage || 0}%
+                      </div>
+                      <div className="text-sm text-indigo-700">Attendance %</div>
                     </div>
                   </div>
 
@@ -435,9 +443,11 @@ const EnhancedStudentProfile = () => {
                               <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                                 record.status === 'Present' 
                                   ? 'bg-green-100 text-green-800' 
+                                  : record.status === 'OD'
+                                  ? 'bg-blue-100 text-blue-800'
                                   : 'bg-red-100 text-red-800'
                               }`}>
-                                {record.status}
+                                {record.status === 'OD' ? '📋 OD' : record.status}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-900">

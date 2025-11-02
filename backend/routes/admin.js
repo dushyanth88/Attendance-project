@@ -231,18 +231,23 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
     })));
 
     // Calculate today's attendance statistics
-    const presentCount = todayAttendanceRecords.filter(r => r.status === 'Present').length;
+    // OD students are considered present for attendance percentage
+    const presentCount = todayAttendanceRecords.filter(r => r.status === 'Present' || r.status === 'OD').length;
+    const odCount = todayAttendanceRecords.filter(r => r.status === 'OD').length;
     const absentCount = todayAttendanceRecords.filter(r => r.status === 'Absent').length;
     const notMarkedCount = validStudents.length - (presentCount + absentCount);
 
     console.log('📊 Attendance breakdown:', {
-      presentCount,
+      presentCount: presentCount - odCount, // Actual present (excluding OD)
+      odCount,
       absentCount,
       notMarkedCount,
-      totalStudents: validStudents.length
+      totalStudents: validStudents.length,
+      effectivePresent: presentCount // Includes OD
     });
     
     // Calculate attendance percentage based on total valid students
+    // OD students are counted as present for percentage calculation
     const attendancePercentage = validStudents.length > 0 
       ? Math.round((presentCount / validStudents.length) * 100) 
       : 0;
@@ -262,7 +267,8 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
         department: department,
         attendancePercentage: attendancePercentage,
         totalStudents: validStudents.length,
-        presentStudents: presentCount,
+        presentStudents: presentCount - odCount, // Actual present (excluding OD)
+        odStudents: odCount,
         absentStudents: absentCount,
         notMarkedStudents: notMarkedCount,
         date: new Date().toISOString().split('T')[0],
@@ -1145,6 +1151,27 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
       }
     });
 
+    // Fetch today's attendance records for all students
+    const Attendance = (await import('../models/Attendance.js')).default;
+    // Use IST date string for reliable matching (YYYY-MM-DD format)
+    const todayIST = new Date();
+    const todayISTString = todayIST.toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+
+    const studentUserIds = students.map(s => s.userId?._id || s.userId).filter(id => id);
+    const todayAttendanceRecords = await Attendance.find({
+      studentId: { $in: studentUserIds },
+      localDate: todayISTString // Use localDate for exact date matching
+    }).lean();
+
+    // Create a map: studentId (userId) -> attendance status
+    const attendanceMap = new Map();
+    todayAttendanceRecords.forEach(record => {
+      const studentId = record.studentId?.toString();
+      if (studentId) {
+        attendanceMap.set(studentId, record.status || 'Not Marked');
+      }
+    });
+
     // Group by department and format students with class teacher info
     const groupedByDepartment = {};
     
@@ -1195,6 +1222,10 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
         }
       }
 
+      // Get today's attendance status for this student
+      const studentUserId = student.userId?._id?.toString() || student.userId?.toString();
+      const todayAttendanceStatus = attendanceMap.get(studentUserId) || 'Not Marked';
+
       groupedByDepartment[department].push({
         id: student._id,
         rollNumber: student.rollNumber,
@@ -1208,7 +1239,8 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
         mobile: student.mobile || student.phone,
         parentContact: student.parentContact,
         classTeacher: classTeacher,
-        status: student.status
+        status: student.status,
+        todayAttendanceStatus: todayAttendanceStatus
       });
     });
 
@@ -1355,16 +1387,21 @@ router.get('/overall-daily-attendance', principalAndAbove, async (req, res) => {
     const userIds = students.map(s => s.userId.toString()); // MATCH ON userId not _id
     // Get today's attendance for all students, match studentId -> User _id
     const attendanceRecords = await Attendance.find({ date: today, studentId: { $in: userIds } });
+    // OD students are counted as Present for percentage calculation
+    const odStudents = attendanceRecords.filter(r => r.status === 'OD').length;
     const presentStudents = attendanceRecords.filter(r => r.status === 'Present').length;
+    const presentStudentsWithOD = presentStudents + odStudents; // Total present including OD
     const absentStudents = attendanceRecords.filter(r => r.status === 'Absent').length;
     const totalStudents = students.length;
-    const notMarkedStudents = totalStudents - (presentStudents + absentStudents);
-    const attendancePercentage = totalStudents > 0 ? Math.round((presentStudents / totalStudents) * 100) : 0;
+    const notMarkedStudents = totalStudents - (presentStudentsWithOD + absentStudents);
+    // OD is counted as Present for percentage calculation
+    const attendancePercentage = totalStudents > 0 ? Math.round((presentStudentsWithOD / totalStudents) * 100) : 0;
     res.json({
       success: true,
       data: {
         totalStudents,
-        presentStudents,
+        presentStudents, // Actual present (excluding OD)
+        odStudents,
         absentStudents,
         notMarkedStudents,
         attendancePercentage,
@@ -1552,6 +1589,27 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
       }
     });
 
+    // Fetch today's attendance records for all students
+    const Attendance = (await import('../models/Attendance.js')).default;
+    // Use IST date string for reliable matching (YYYY-MM-DD format)
+    const todayIST = new Date();
+    const todayISTString = todayIST.toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+
+    const studentUserIds = students.map(s => s.userId?._id || s.userId).filter(id => id);
+    const todayAttendanceRecords = await Attendance.find({
+      studentId: { $in: studentUserIds },
+      localDate: todayISTString // Use localDate for exact date matching
+    }).lean();
+
+    // Create a map: studentId (userId) -> attendance status
+    const attendanceMap = new Map();
+    todayAttendanceRecords.forEach(record => {
+      const studentId = record.studentId?.toString();
+      if (studentId) {
+        attendanceMap.set(studentId, record.status || 'Not Marked');
+      }
+    });
+
     // Format students with class teacher info (current class advisor)
     const formattedStudents = students.map(student => {
       // Get the current class advisor for this student's class
@@ -1595,6 +1653,10 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
         }
       }
 
+      // Get today's attendance status for this student
+      const studentUserId = student.userId?._id?.toString() || student.userId?.toString();
+      const todayAttendanceStatus = attendanceMap.get(studentUserId) || 'Not Marked';
+
       return {
         id: student._id,
         rollNumber: student.rollNumber,
@@ -1608,7 +1670,8 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
         mobile: student.mobile || student.phone,
         parentContact: student.parentContact,
         classTeacher: classTeacher,
-        status: student.status
+        status: student.status,
+        todayAttendanceStatus: todayAttendanceStatus
       };
     });
 

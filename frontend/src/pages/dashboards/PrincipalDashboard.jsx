@@ -311,6 +311,7 @@ const PrincipalDashboard = () => {
               <div className="flex flex-col sm:flex-row w-full justify-between gap-8 items-center">
                 <div className="flex flex-col items-center"><span className="text-lg">Total Students</span><span className="text-3xl font-bold">{overallStats.totalStudents}</span></div>
                 <div className="flex flex-col items-center"><span className="text-lg">Present</span><span className="text-2xl font-semibold text-green-200">{overallStats.presentStudents}</span></div>
+                <div className="flex flex-col items-center"><span className="text-lg">OD</span><span className="text-2xl font-semibold text-blue-200">{overallStats.odStudents || 0}</span></div>
                 <div className="flex flex-col items-center"><span className="text-lg">Absent</span><span className="text-2xl font-semibold text-red-200">{overallStats.absentStudents}</span></div>
                 <div className="flex flex-col items-center"><span className="text-lg">Not Marked</span><span className="text-2xl font-semibold text-yellow-200">{overallStats.notMarkedStudents}</span></div>
                 <div className="flex flex-col items-center"><span className="text-lg">Present %</span><span className="text-2xl font-bold text-white">{overallStats.attendancePercentage}%</span></div>

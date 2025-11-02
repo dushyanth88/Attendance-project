@@ -1304,6 +1304,7 @@ router.get('/:id/attendance', authenticate, async (req, res) => {
     if (allAttendanceRecords.length === 0) {
       return res.status(200).json({
         presentDays: 0,
+        odDays: 0,
         absentDays: 0,
         totalWorkingDays: 0,
         attendancePercentage: 0,
@@ -1319,11 +1320,14 @@ router.get('/:id/attendance', authenticate, async (req, res) => {
       });
     }
 
-    // Calculate statistics
+    // Calculate statistics (OD is counted as Present for percentage)
+    const odDays = allAttendanceRecords.filter(record => record.status === 'OD').length;
     const presentDays = allAttendanceRecords.filter(record => record.status === 'Present').length;
+    const presentDaysWithOD = presentDays + odDays; // Total present including OD
     const absentDays = allAttendanceRecords.filter(record => record.status === 'Absent').length;
-    const totalWorkingDays = presentDays + absentDays;
-    const attendancePercentage = totalWorkingDays > 0 ? Math.round((presentDays / totalWorkingDays) * 100) : 0;
+    const totalWorkingDays = presentDaysWithOD + absentDays;
+    // OD is counted as Present for percentage calculation
+    const attendancePercentage = totalWorkingDays > 0 ? Math.round((presentDaysWithOD / totalWorkingDays) * 100) : 0;
 
     // Get current semester absents (last 30 days as approximation)
     const thirtyDaysAgo = new Date();
@@ -1355,6 +1359,7 @@ router.get('/:id/attendance', authenticate, async (req, res) => {
 
     res.status(200).json({
       presentDays,
+      odDays,
       absentDays,
       totalWorkingDays,
       attendancePercentage,
@@ -1485,13 +1490,17 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     });
 
     const totalDays = workingDaysRecords.length;
-    const presentDays = workingDaysRecords.filter(record => record.status === 'Present').length;
+    // OD students are counted as Present for percentage calculation
+    const presentDaysWithOD = workingDaysRecords.filter(record => record.status === 'Present' || record.status === 'OD').length;
+    const odDays = workingDaysRecords.filter(record => record.status === 'OD').length;
+    const presentDays = presentDaysWithOD - odDays; // Actual present (excluding OD)
     const absentDays = workingDaysRecords.filter(record => record.status === 'Absent').length;
     const notMarkedDays = attendanceRecords.filter(record => {
       const recordDate = record.date.toISOString().split('T')[0];
       return !holidayDates.has(recordDate) && record.status === 'Not Marked';
     }).length;
-    const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+    // Use presentDaysWithOD for percentage calculation (includes OD)
+    const attendancePercentage = totalDays > 0 ? Math.round((presentDaysWithOD / totalDays) * 100) : 0;
 
     // Group attendance by month for calendar view (including holidays)
     const monthlyAttendance = {};
@@ -1556,6 +1565,7 @@ router.get('/:id/profile', authenticate, async (req, res) => {
         attendanceStats: {
           totalDays,
           presentDays,
+          odDays,
           absentDays,
           notMarkedDays,
           attendancePercentage,

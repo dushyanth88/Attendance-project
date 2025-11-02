@@ -622,7 +622,7 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
 
     const total = await Attendance.countDocuments(filter);
 
-    // Calculate attendance statistics
+    // Calculate attendance statistics (OD is counted as Present for percentage)
     const stats = await Attendance.aggregate([
       { $match: { studentId: new (Attendance.db.base.Types.ObjectId)(studentId), ...(filter.date ? { date: filter.date } : {}) } },
       {
@@ -630,14 +630,17 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
           _id: null,
           totalDays: { $sum: 1 },
           presentDays: { $sum: { $cond: [{ $eq: ['$status', 'Present'] }, 1, 0] } },
+          odDays: { $sum: { $cond: [{ $eq: ['$status', 'OD'] }, 1, 0] } },
           absentDays: { $sum: { $cond: [{ $eq: ['$status', 'Absent'] }, 1, 0] } }
         }
       }
     ]);
 
-    const attendanceStats = stats[0] || { totalDays: 0, presentDays: 0, absentDays: 0 };
+    const attendanceStats = stats[0] || { totalDays: 0, presentDays: 0, odDays: 0, absentDays: 0 };
+    // OD is counted as Present for percentage calculation
+    const presentWithOD = attendanceStats.presentDays + attendanceStats.odDays;
     const overallPercentage = attendanceStats.totalDays > 0
-      ? Math.round((attendanceStats.presentDays / attendanceStats.totalDays) * 100)
+      ? Math.round((presentWithOD / attendanceStats.totalDays) * 100)
       : 0;
 
     const attendance = attendanceDocs.map(doc => ({ 
@@ -784,7 +787,9 @@ router.get('/student/:studentId/comprehensive', authenticate, async (req, res) =
 
     const allRecords = [...attendanceRecords, ...holidayRecords];
 
-    const presentCount = attendanceRecords.filter(r => r.status === 'Present').length;
+    // OD students are counted as Present for percentage calculation
+    const presentCount = attendanceRecords.filter(r => r.status === 'Present' || r.status === 'OD').length;
+    const odCount = attendanceRecords.filter(r => r.status === 'OD').length;
     const absentCount = attendanceRecords.filter(r => r.status === 'Absent').length;
     const totalWorkingDays = presentCount + absentCount;
     const attendancePercentage = totalWorkingDays > 0 ? Math.round((presentCount / totalWorkingDays) * 100) : 0;
@@ -803,7 +808,8 @@ router.get('/student/:studentId/comprehensive', authenticate, async (req, res) =
         attendance: {
           records: allRecords.sort((a, b) => new Date(b.date) - new Date(a.date)),
           summary: {
-            presentDays: presentCount,
+            presentDays: presentCount - odCount, // Actual present (excluding OD)
+            odDays: odCount,
             absentDays: absentCount,
             totalWorkingDays: totalWorkingDays,
             attendancePercentage: attendancePercentage,
@@ -1213,7 +1219,8 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
   body('semester').exists().withMessage('Semester is required'),
   body('section').optional().isString().trim(),
   body('date').optional().isISO8601().withMessage('Invalid date format'),
-  body('absentRollNumbers').optional().isArray().withMessage('absentRollNumbers must be an array')
+  body('absentRollNumbers').optional().isArray().withMessage('absentRollNumbers must be an array'),
+  body('odRollNumbers').optional().isArray().withMessage('odRollNumbers must be an array')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1348,6 +1355,7 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
     }
 
     const absentees = Array.isArray(req.body.absentRollNumbers) ? req.body.absentRollNumbers.map(r => String(r).trim()) : [];
+    const odRollNumbers = Array.isArray(req.body.odRollNumbers) ? req.body.odRollNumbers.map(r => String(r).trim()) : [];
     
     const rollToStudent = new Map(students.map(s => [s.rollNumber, s]));
     
@@ -1358,11 +1366,27 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       }
     }
     
-    // Determine present students (all students not in absentees list)
-    const presentStudents = students.filter(s => !absentees.includes(s.rollNumber));
+    // Validate all provided OD roll numbers exist
+    for (const roll of odRollNumbers) {
+      if (!rollToStudent.has(roll)) {
+        return res.status(400).json({ status: 'error', message: `Invalid OD roll number: ${roll}` });
+      }
+    }
+    
+    // Check for overlap between absentees and OD
+    const overlap = absentees.filter(roll => odRollNumbers.includes(roll));
+    if (overlap.length > 0) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: `Roll numbers cannot be both Absent and OD: ${overlap.join(', ')}` 
+      });
+    }
+    
+    // Determine present students (all students not in absentees or OD list)
+    const presentStudents = students.filter(s => !absentees.includes(s.rollNumber) && !odRollNumbers.includes(s.rollNumber));
     const presentRollNumbers = presentStudents.map(s => s.rollNumber);
 
-    // Upsert attendance records: mark all students (absent and present)
+    // Upsert attendance records: mark all students (absent, OD, and present)
     const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
     const bulkOps = [];
     
@@ -1375,6 +1399,26 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
           update: {
             $set: {
               status: 'Absent',
+              facultyId: currentUser._id,
+              date: requestDateString,
+              localDate: requestDateString,
+              classId: classKey
+            }
+          },
+          upsert: true
+        }
+      });
+    }
+    
+    // Add operations for OD students
+    for (const roll of odRollNumbers) {
+      const student = rollToStudent.get(roll);
+      bulkOps.push({
+        updateOne: {
+          filter: { studentId: student.userId, classId: classKey, localDate: requestDateString },
+          update: {
+            $set: {
+              status: 'OD',
               facultyId: currentUser._id,
               date: requestDateString,
               localDate: requestDateString,
@@ -1410,7 +1454,12 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
 
     // Push SSE updates to all students
     for (const student of students) {
-      const status = absentees.includes(student.rollNumber) ? 'Absent' : 'Present';
+      let status = 'Present';
+      if (absentees.includes(student.rollNumber)) {
+        status = 'Absent';
+      } else if (odRollNumbers.includes(student.rollNumber)) {
+        status = 'OD';
+      }
       sendAttendanceEvent(String(student.userId), {
         date: requestDateString,
         status
@@ -1436,11 +1485,13 @@ router.post('/mark-students', authenticate, facultyAndAbove, [
       data: {
         marked: {
           present: presentRollNumbers,
-          absent: absentees
+          absent: absentees,
+          od: odRollNumbers
         },
         totalStudents: students.length,
         presentCount: presentRollNumbers.length,
-        absentCount: absentees.length
+        absentCount: absentees.length,
+        odCount: odRollNumbers.length
       }
     });
   } catch (error) {
@@ -1501,28 +1552,58 @@ router.put('/edit-students', authenticate, facultyAndAbove, [
       return res.status(404).json({ status: 'error', message: 'No students found for this class' });
     }
 
-    const absentees = req.body.absentRollNumbers.map(r => String(r).trim());
+    const absentees = Array.isArray(req.body.absentRollNumbers) ? req.body.absentRollNumbers.map(r => String(r).trim()) : [];
+    const odRollNumbers = Array.isArray(req.body.odRollNumbers) ? req.body.odRollNumbers.map(r => String(r).trim()) : [];
     const rollToStudent = new Map(students.map(s => [s.rollNumber, s]));
+    
     for (const roll of absentees) {
       if (!rollToStudent.has(roll)) {
         return res.status(400).json({ status: 'error', message: `Invalid absentee roll number: ${roll}` });
       }
     }
+    
+    for (const roll of odRollNumbers) {
+      if (!rollToStudent.has(roll)) {
+        return res.status(400).json({ status: 'error', message: `Invalid OD roll number: ${roll}` });
+      }
+    }
+    
+    // Check for overlap
+    const overlap = absentees.filter(roll => odRollNumbers.includes(roll));
+    if (overlap.length > 0) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: `Roll numbers cannot be both Absent and OD: ${overlap.join(', ')}` 
+      });
+    }
 
     const classKey = makeClassKey({ batch, year: normalizedYear, semester: normalizedSemester, section });
-    const bulkOps = students.map(s => ({
-      updateOne: {
-        filter: { studentId: s.userId, classId: classKey, date: requestDate },
-        update: { $set: { status: absentees.includes(s.rollNumber) ? 'Absent' : 'Present', facultyId: currentUser._id, classId: classKey } },
-        upsert: true
+    const bulkOps = students.map(s => {
+      let status = 'Present';
+      if (absentees.includes(s.rollNumber)) {
+        status = 'Absent';
+      } else if (odRollNumbers.includes(s.rollNumber)) {
+        status = 'OD';
       }
-    }));
+      return {
+        updateOne: {
+          filter: { studentId: s.userId, classId: classKey, date: requestDate },
+          update: { $set: { status, facultyId: currentUser._id, classId: classKey } },
+          upsert: true
+        }
+      };
+    });
 
     await Attendance.bulkWrite(bulkOps, { ordered: true });
 
     // Push SSE updates
     for (const s of students) {
-      const status = absentees.includes(s.rollNumber) ? 'Absent' : 'Present';
+      let status = 'Present';
+      if (absentees.includes(s.rollNumber)) {
+        status = 'Absent';
+      } else if (odRollNumbers.includes(s.rollNumber)) {
+        status = 'OD';
+      }
       sendAttendanceEvent(String(s.userId), {
         date: requestDate.toISOString().slice(0, 10),
         status

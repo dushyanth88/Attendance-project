@@ -489,7 +489,8 @@ const ClassAttendanceManagement = () => {
 // Mark Attendance Tab Component
 const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) => {
   const [attendanceForm, setAttendanceForm] = useState({
-    absentees: ''
+    absentees: '',
+    odRollNumbers: ''
   });
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceMarked, setAttendanceMarked] = useState(false);
@@ -572,7 +573,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
 
   const handleCancelEdit = () => {
     setEditMode(false);
-    setAttendanceForm({ absentees: '' });
+    setAttendanceForm({ absentees: '', odRollNumbers: '' });
     checkAttendanceStatus(); // Re-check attendance status
   };
 
@@ -592,6 +593,12 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
         .split(',')
         .map(t => t.trim())
         .filter(t => t.length > 0);
+      
+      // Parse OD roll numbers
+      const odRollNumbers = (attendanceForm.odRollNumbers || '')
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
 
       const requestData = {
         batch: classData.batch,
@@ -599,7 +606,8 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
         semester: parseInt(classData.semester), // Ensure semester is a number
         section: classData.section || 'A', // Default to 'A' if section is undefined
         date: todayISO,
-        absentRollNumbers
+        absentRollNumbers,
+        odRollNumbers
       };
 
       // Validate request data
@@ -630,7 +638,7 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
 
       if (response.data.status === 'success') {
         onToast('Attendance marked successfully!', 'success');
-        setAttendanceForm(prev => ({ ...prev, absentees: '' }));
+        setAttendanceForm({ absentees: '', odRollNumbers: '' });
         setAttendanceMarked(true);
         setEditMode(false);
         // Refresh attendance status after marking
@@ -754,6 +762,21 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                 rows={3}
               className="w-full px-4 py-3 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              📋 OD (On Duty) Students (Enter roll numbers separated by commas)
+              </label>
+              <textarea
+                name="odRollNumbers"
+                value={attendanceForm.odRollNumbers}
+                onChange={handleAttendanceChange}
+                placeholder="e.g., STU002, STU004"
+                rows={3}
+                className="w-full px-4 py-3 border border-green-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 shadow-sm bg-green-50"
+              />
+              <p className="text-xs text-gray-500 mt-1">OD students are considered present for attendance calculation</p>
             </div>
 
           <div className="flex justify-end space-x-3">
@@ -899,10 +922,12 @@ const MarkAttendanceTab = ({ classData, students, onToast, onStudentsUpdate }) =
                             return (
                               <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                 status === 'Present' ? 'bg-green-100 text-green-800' :
+                                status === 'OD' ? 'bg-blue-100 text-blue-800' :
                                 status === 'Absent' ? 'bg-red-100 text-red-800' :
                                 'bg-yellow-100 text-yellow-800'
                               }`}>
                                 {status === 'Present' ? '✅ Present' :
+                                 status === 'OD' ? '📋 OD' :
                                  status === 'Absent' ? '❌ Absent' :
                                  '⏳ Not Marked'}
                               </span>
@@ -963,7 +988,8 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
                   };
                 }
                 
-                if (record.status === 'Present') {
+                // OD is counted as Present for calculations
+                if (record.status === 'Present' || record.status === 'OD') {
                   acc[recordDate].presentCount++;
                 } else if (record.status === 'Absent') {
                   acc[recordDate].absentCount++;
@@ -1006,7 +1032,8 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
                   };
                 }
                 
-                if (record.status === 'Present') {
+                // OD is counted as Present for calculations
+                if (record.status === 'Present' || record.status === 'OD') {
                   acc[recordDate].presentCount++;
                 } else if (record.status === 'Absent') {
                   acc[recordDate].absentCount++;

@@ -58,6 +58,7 @@ const StudentProfile = () => {
   const getAttendanceColor = (status) => {
     switch (status) {
       case 'Present': return 'text-green-600 bg-green-100';
+      case 'OD': return 'text-blue-600 bg-blue-100';
       case 'Absent': return 'text-red-600 bg-red-100';
       case 'Not Marked': return 'text-yellow-600 bg-yellow-100';
       case 'Holiday': return 'text-yellow-600 bg-yellow-100';
@@ -68,6 +69,7 @@ const StudentProfile = () => {
   const getAttendanceIcon = (status) => {
     switch (status) {
       case 'Present': return '✅';
+      case 'OD': return '📋';
       case 'Absent': return '❌';
       case 'Not Marked': return '❔';
       case 'Holiday': return '🎉';
@@ -288,6 +290,14 @@ const StudentProfile = () => {
                     <span className="text-2xl font-bold text-green-600">{attendanceStats.presentDays}</span>
                   </div>
                   
+                  <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">📋</span>
+                      <span className="font-medium text-blue-800">OD Days</span>
+                    </div>
+                    <span className="text-2xl font-bold text-blue-600">{attendanceStats.odDays || 0}</span>
+                  </div>
+                  
                   <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
                     <div className="flex items-center">
                       <span className="text-2xl mr-3">❌</span>
@@ -371,6 +381,10 @@ const StudentProfile = () => {
                     <div className="flex items-center">
                       <span className="w-3 h-3 bg-green-100 rounded mr-2">✅</span>
                       <span>Present</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-3 h-3 bg-blue-100 rounded mr-2">📋</span>
+                      <span>OD</span>
                     </div>
                     <div className="flex items-center">
                       <span className="w-3 h-3 bg-red-100 rounded mr-2">❌</span>

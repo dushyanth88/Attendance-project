@@ -13,6 +13,7 @@ const StudentsByDepartment = () => {
   const [error, setError] = useState('');
   const [expandedDepartments, setExpandedDepartments] = useState(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState('all'); // 'all', 'absent', 'od', 'absent-or-od'
 
   useEffect(() => {
     fetchStudentsByDepartment();
@@ -28,7 +29,24 @@ const StudentsByDepartment = () => {
       });
 
       if (response.data.success) {
-        setStudentsByDepartment(response.data.data.departments || []);
+        const departments = response.data.data.departments || [];
+        console.log('📊 Students by department loaded:', departments.length, 'departments');
+        
+        // Debug: Check if students have todayAttendanceStatus
+        departments.forEach(dept => {
+          const odCount = dept.students?.filter(s => (s.todayAttendanceStatus || 'Not Marked') === 'OD').length || 0;
+          const absentCount = dept.students?.filter(s => (s.todayAttendanceStatus || 'Not Marked') === 'Absent').length || 0;
+          if (odCount > 0 || absentCount > 0) {
+            console.log(`📋 ${dept.department}: ${odCount} OD, ${absentCount} Absent`);
+            // Log sample student with attendance status
+            const sample = dept.students?.find(s => s.todayAttendanceStatus);
+            if (sample) {
+              console.log(`📋 Sample student: ${sample.name} - Status: ${sample.todayAttendanceStatus}`);
+            }
+          }
+        });
+        
+        setStudentsByDepartment(departments);
         setTotalStudents(response.data.data.total || 0);
       } else {
         setError('Failed to load students data');
@@ -59,16 +77,49 @@ const StudentsByDepartment = () => {
   };
 
   const filterStudents = (students) => {
-    if (!searchTerm.trim()) return students;
-    
-    const term = searchTerm.toLowerCase();
-    return students.filter(student => 
-      student.name.toLowerCase().includes(term) ||
-      student.rollNumber?.toLowerCase().includes(term) ||
-      student.email?.toLowerCase().includes(term) ||
-      student.batch?.toLowerCase().includes(term) ||
-      student.mobile?.includes(term)
-    );
+    let filtered = students;
+
+    // Apply attendance filter first
+    if (attendanceFilter === 'absent') {
+      filtered = filtered.filter(s => {
+        const status = s.todayAttendanceStatus || 'Not Marked';
+        const isAbsent = status === 'Absent';
+        if (attendanceFilter === 'absent' && !isAbsent) {
+          console.log(`🔍 Filtering out: ${s.name} - Status: ${status}`);
+        }
+        return isAbsent;
+      });
+      console.log(`📊 After absent filter: ${filtered.length} students`);
+    } else if (attendanceFilter === 'od') {
+      filtered = filtered.filter(s => {
+        const status = s.todayAttendanceStatus || 'Not Marked';
+        const isOD = status === 'OD';
+        if (!isOD && s.todayAttendanceStatus) {
+          console.log(`🔍 Filtering out: ${s.name} - Status: ${status}`);
+        }
+        return isOD;
+      });
+      console.log(`📊 After OD filter: ${filtered.length} students`);
+    } else if (attendanceFilter === 'absent-or-od') {
+      filtered = filtered.filter(s => {
+        const status = s.todayAttendanceStatus || 'Not Marked';
+        return status === 'Absent' || status === 'OD';
+      });
+    }
+
+    // Apply search term filter
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(student => 
+        student.name.toLowerCase().includes(term) ||
+        student.rollNumber?.toLowerCase().includes(term) ||
+        student.email?.toLowerCase().includes(term) ||
+        student.batch?.toLowerCase().includes(term) ||
+        student.mobile?.includes(term)
+      );
+    }
+
+    return filtered;
   };
 
   if (loading) {
@@ -124,29 +175,47 @@ const StudentsByDepartment = () => {
           </div>
         </div>
 
-        {/* Search Bar */}
+        {/* Search Bar and Filters */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 mb-6">
-          <div className="flex items-center space-x-4">
-            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search by name, roll number, email, batch, or mobile..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 border-0 focus:ring-0 focus:outline-none text-gray-700 placeholder-gray-400"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="text-gray-400 hover:text-gray-600"
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            {/* Search Input */}
+            <div className="flex items-center space-x-4 flex-1 min-w-0">
+              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by name, roll number, email, batch, or mobile..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1 min-w-0 border-0 focus:ring-0 focus:outline-none text-gray-700 placeholder-gray-400"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            
+            {/* Attendance Filter */}
+            <div className="flex items-center space-x-2 md:border-l md:border-gray-200 md:pl-4 pt-2 md:pt-0 border-t border-gray-200 md:border-t-0 flex-shrink-0">
+              <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Filter:</span>
+              <select
+                value={attendanceFilter}
+                onChange={(e) => setAttendanceFilter(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 bg-white min-w-[160px] flex-shrink-0"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
+                <option value="all">All Students</option>
+                <option value="absent">❌ Absentees Only</option>
+                <option value="od">📋 OD Only</option>
+                <option value="absent-or-od">❌ Absent + 📋 OD</option>
+              </select>
+            </div>
           </div>
         </div>
 

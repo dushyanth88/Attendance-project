@@ -30,6 +30,7 @@ const HODDashboard = () => {
     attendancePercentage: 0,
     totalStudents: 0,
     presentStudents: 0,
+    odStudents: 0,
     absentStudents: 0,
     notMarkedStudents: 0,
     date: '',
@@ -174,6 +175,7 @@ const HODDashboard = () => {
           attendancePercentage: data.attendancePercentage,
           totalStudents: data.totalStudents,
           presentStudents: data.presentStudents,
+          odStudents: data.odStudents || 0,
           absentStudents: data.absentStudents,
           notMarkedStudents: data.notMarkedStudents,
           date: data.date,
@@ -347,11 +349,18 @@ const HODDashboard = () => {
                     `${dailyAttendanceStats.attendancePercentage}%`
                   )}
                 </p>
-                <p className="text-xs text-green-100 mt-1 bg-white bg-opacity-20 inline-block px-2 py-0.5 rounded-full">
-                  {dailyAttendanceStats.loading ? '' : 
-                    `${dailyAttendanceStats.presentStudents}/${dailyAttendanceStats.totalStudents} present`
-                  }
-                </p>
+                <div className="flex flex-col gap-1 mt-1">
+                  <p className="text-xs text-green-100 bg-white bg-opacity-20 inline-block px-2 py-0.5 rounded-full">
+                    {dailyAttendanceStats.loading ? '' : 
+                      `${dailyAttendanceStats.presentStudents}/${dailyAttendanceStats.totalStudents} present`
+                    }
+                  </p>
+                  {!dailyAttendanceStats.loading && dailyAttendanceStats.odStudents > 0 && (
+                    <p className="text-xs text-blue-100 bg-white bg-opacity-20 inline-block px-2 py-0.5 rounded-full">
+                      📋 {dailyAttendanceStats.odStudents} OD
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

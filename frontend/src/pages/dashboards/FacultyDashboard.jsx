@@ -298,12 +298,18 @@ const FacultyDashboard = () => {
                           
                           {/* Attendance Summary */}
                           {studentAttendance[cls.classId] && (
-                            <div className="grid grid-cols-3 gap-2 mb-4">
+                            <div className="grid grid-cols-4 gap-2 mb-4">
                               <div className="bg-green-50 rounded-lg p-2 text-center">
                                 <div className="text-lg font-bold text-green-600">
                                   {studentAttendance[cls.classId].filter(s => s.attendanceStatus === 'Present').length}
                                 </div>
                                 <div className="text-xs text-green-700">Present</div>
+                              </div>
+                              <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <div className="text-lg font-bold text-blue-600">
+                                  {studentAttendance[cls.classId].filter(s => s.attendanceStatus === 'OD').length}
+                                </div>
+                                <div className="text-xs text-blue-700">OD</div>
                               </div>
                               <div className="bg-red-50 rounded-lg p-2 text-center">
                                 <div className="text-lg font-bold text-red-600">
@@ -338,10 +344,12 @@ const FacultyDashboard = () => {
                                     </div>
                                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm ${
                                       student.attendanceStatus === 'Present' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white' :
+                                      student.attendanceStatus === 'OD' ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white' :
                                       student.attendanceStatus === 'Absent' ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white' :
                                       'bg-gradient-to-r from-yellow-500 to-orange-500 text-white'
                                     }`}>
                                       {student.attendanceStatus === 'Present' ? '✅ Present' :
+                                       student.attendanceStatus === 'OD' ? '📋 OD' :
                                        student.attendanceStatus === 'Absent' ? '❌ Absent' :
                                        '⏳ Not Marked'}
                                     </span>
