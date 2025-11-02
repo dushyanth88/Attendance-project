@@ -167,121 +167,47 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
     // Import Attendance model
     const Attendance = (await import('../models/Attendance.js')).default;
 
-    // Debug: Check all students in department first
-    const allDepartmentStudents = await Student.find({ department: department });
-    console.log('📊 All students in department:', allDepartmentStudents.length);
-    console.log('📊 Sample students:', allDepartmentStudents.slice(0, 3).map(s => ({
-      id: s._id,
-      name: s.name,
-      department: s.department,
-      createdBy: s.createdBy,
-      status: s.status
-    })));
-
-    // Get all faculty members in the department
-    const departmentFaculty = await Faculty.find({
+    // Get all students in the department (matching the logic from department-stats)
+    // Try active students first
+    let studentsToUse = await Student.find({ 
       department: department,
-      status: 'active'
-    });
-
-    // If no active faculty, try without status filter
-    const facultyToUse = departmentFaculty.length > 0 ? departmentFaculty : 
-      await Faculty.find({ department: department });
-
-    if (facultyToUse.length === 0) {
-      return res.json({
-        success: true,
-        data: {
-          department: department,
-          attendancePercentage: 0,
-          totalStudents: 0,
-          presentStudents: 0,
-          absentStudents: 0,
-          notMarkedStudents: 0,
-          date: new Date().toISOString().split('T')[0],
-          lastUpdated: new Date().toISOString()
-        }
-      });
-    }
-
-    // Get faculty IDs from both Faculty model and User model
-    const facultyIds = facultyToUse.map(faculty => faculty._id);
-    
-    // Also get faculty users from User model
-    const facultyUsers = await User.find({
-      role: 'faculty',
-      department: department
-    });
-    const facultyUserIds = facultyUsers.map(user => user._id);
-    
-    // Combine both faculty IDs
-    const allFacultyIds = [...facultyIds, ...facultyUserIds];
-    
-    console.log('📊 Faculty IDs from Faculty model:', facultyIds);
-    console.log('📊 Faculty IDs from User model:', facultyUserIds);
-    console.log('📊 Combined faculty IDs:', allFacultyIds);
-
-    // Get students created by faculty members in this department
-    const departmentStudents = await Student.find({
-      department: department,
-      createdBy: { $in: allFacultyIds },
       status: 'active'
     }).populate('userId', '_id');
-
-    console.log('📊 Students created by department faculty (active):', departmentStudents.length);
-
-    // If no active students, try without status filter
-    let studentsToUse = departmentStudents.length > 0 ? departmentStudents : 
-      await Student.find({ 
-        department: department,
-        createdBy: { $in: allFacultyIds }
-      }).populate('userId', '_id');
-
-    console.log('📊 Final students to use:', studentsToUse.length);
-    console.log('📊 Sample students to use:', studentsToUse.slice(0, 3).map(s => ({
-      id: s._id,
-      name: s.name,
-      createdBy: s.createdBy,
-      userId: s.userId._id
-    })));
-
-    // If no students created by faculty, fallback to all students in department
+    
+    console.log('📊 Active students in department:', studentsToUse.length);
+    
+    // If no active students, fallback to all students in department
     if (studentsToUse.length === 0) {
-      console.log('📊 No students created by faculty, falling back to all department students');
-      const fallbackStudents = await Student.find({ 
-        department: department,
-        status: 'active'
+      console.log('📊 No active students found, using all students in department');
+      studentsToUse = await Student.find({ 
+        department: department
       }).populate('userId', '_id');
       
-      if (fallbackStudents.length === 0) {
-        const allStudentsFallback = await Student.find({ 
-          department: department
-        }).populate('userId', '_id');
-        
-        if (allStudentsFallback.length === 0) {
-          return res.json({
-            success: true,
-            data: {
-              department: department,
-              attendancePercentage: 0,
-              totalStudents: 0,
-              presentStudents: 0,
-              absentStudents: 0,
-              notMarkedStudents: 0,
-              date: new Date().toISOString().split('T')[0],
-              lastUpdated: new Date().toISOString(),
-              debug: 'No students found in department'
-            }
-          });
-        }
-        
-        studentsToUse = allStudentsFallback;
-        console.log('📊 Using all students in department (no status filter):', studentsToUse.length);
-      } else {
-        studentsToUse = fallbackStudents;
-        console.log('📊 Using all active students in department:', studentsToUse.length);
+      console.log('📊 All students in department (no status filter):', studentsToUse.length);
+      
+      if (studentsToUse.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            department: department,
+            attendancePercentage: 0,
+            totalStudents: 0,
+            presentStudents: 0,
+            absentStudents: 0,
+            notMarkedStudents: 0,
+            date: new Date().toISOString().split('T')[0],
+            lastUpdated: new Date().toISOString(),
+            debug: 'No students found in department'
+          }
+        });
       }
     }
+    
+    console.log('📊 Total students for attendance calculation:', studentsToUse.length);
+    
+    // Filter out students without valid userId
+    const validStudents = studentsToUse.filter(student => student.userId && student.userId._id);
+    console.log('📊 Valid students (with userId):', validStudents.length);
 
     // Get today's attendance records for department students
     const today = new Date();
@@ -290,7 +216,7 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const todayAttendanceRecords = await Attendance.find({
-      studentId: { $in: studentsToUse.map(student => student.userId._id) },
+      studentId: { $in: validStudents.map(student => student.userId._id) },
       date: {
         $gte: today,
         $lt: tomorrow
@@ -307,24 +233,23 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
     // Calculate today's attendance statistics
     const presentCount = todayAttendanceRecords.filter(r => r.status === 'Present').length;
     const absentCount = todayAttendanceRecords.filter(r => r.status === 'Absent').length;
-    const notMarkedCount = studentsToUse.length - (presentCount + absentCount);
+    const notMarkedCount = validStudents.length - (presentCount + absentCount);
 
     console.log('📊 Attendance breakdown:', {
       presentCount,
       absentCount,
       notMarkedCount,
-      totalStudents: studentsToUse.length
+      totalStudents: validStudents.length
     });
     
-    // Calculate attendance percentage based on total students
-    const attendancePercentage = studentsToUse.length > 0 
-      ? Math.round((presentCount / studentsToUse.length) * 100) 
+    // Calculate attendance percentage based on total valid students
+    const attendancePercentage = validStudents.length > 0 
+      ? Math.round((presentCount / validStudents.length) * 100) 
       : 0;
 
     console.log('📊 Daily attendance calculation:', {
       department,
-      totalFaculty: facultyToUse.length,
-      totalStudents: studentsToUse.length,
+      totalStudents: validStudents.length,
       presentStudents: presentCount,
       absentStudents: absentCount,
       notMarkedStudents: notMarkedCount,
@@ -336,7 +261,7 @@ router.get('/daily-attendance', hodAndAbove, async (req, res) => {
       data: {
         department: department,
         attendancePercentage: attendancePercentage,
-        totalStudents: studentsToUse.length,
+        totalStudents: validStudents.length,
         presentStudents: presentCount,
         absentStudents: absentCount,
         notMarkedStudents: notMarkedCount,
@@ -1587,11 +1512,14 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
       return { batch, year, semester: parseInt(semester), section };
     });
 
+    // Filter class assignments by department to prevent cross-department matches
+    // Only get assignments for the HOD's department (using departmentId)
     const classAssignments = await ClassAssignment.find({
       $or: classAssignmentsArray,
+      departmentId: currentUser._id, // Only get assignments for HOD's department
       active: true
     })
-      .populate('facultyId', 'name email position')
+      .populate('facultyId', 'name email position department')
       .lean();
 
     // Create a map: classKey -> classAssignment
@@ -1607,8 +1535,10 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
       .map(ca => ca.facultyId._id.toString())
     )];
 
+    // Filter faculty records by department to ensure only faculty from HOD's department
     const facultyRecords = await Faculty.find({
-      userId: { $in: facultyUserIds }
+      userId: { $in: facultyUserIds },
+      department: department // Only get faculty from HOD's department
     })
       .select('name position email department userId')
       .lean();
@@ -1644,21 +1574,23 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
             const facultyUserId = classAssignment.facultyId._id?.toString();
             const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
 
-            if (advisorFaculty) {
+            // Only use faculty if they belong to the same department
+            if (advisorFaculty && advisorFaculty.department === department) {
               classTeacher = {
                 id: advisorFaculty._id,
                 name: advisorFaculty.name,
                 position: advisorFaculty.position || 'Faculty',
                 email: advisorFaculty.email || classAssignment.facultyId.email
               };
-            } else if (classAssignment.facultyId) {
-              // Fallback to User info if Faculty record not found
+            } else if (classAssignment.facultyId && classAssignment.facultyId.department === department) {
+              // Fallback to User info if Faculty record not found, but verify department matches
               classTeacher = {
                 name: classAssignment.facultyId.name || 'Unknown',
                 position: classAssignment.facultyId.position || 'Faculty',
                 email: classAssignment.facultyId.email
               };
             }
+            // If faculty doesn't belong to department, classTeacher remains null
           }
         }
       }
