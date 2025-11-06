@@ -717,13 +717,31 @@ router.put('/:id/attendance-dates', [
       updateData.attendanceEndDate = attendanceEndDate ? new Date(attendanceEndDate) : null;
     }
 
+    console.log('📝 Update data:', updateData);
+
     const updatedAssignment = await ClassAssignment.findByIdAndUpdate(
       id,
-      updateData,
-      { new: true }
+      { $set: updateData },
+      { new: true, runValidators: true }
     ).populate('facultyId', 'name email').populate('assignedBy', 'name email');
 
-    res.json({
+    if (!updatedAssignment) {
+      console.log('❌ Assignment not found after update');
+      return res.status(404).json({
+        status: 'error',
+        message: 'Class assignment not found after update'
+      });
+    }
+
+    console.log('✅ Updated assignment:', {
+      id: updatedAssignment._id,
+      attendanceStartDate: updatedAssignment.attendanceStartDate,
+      attendanceEndDate: updatedAssignment.attendanceEndDate,
+      updatedAt: updatedAssignment.updatedAt
+    });
+
+    // Return the response with proper formatting
+    const responseData = {
       status: 'success',
       message: 'Attendance date range updated successfully',
       data: {
@@ -741,7 +759,18 @@ router.put('/:id/attendance-dates', [
         attendanceStartDate: updatedAssignment.attendanceStartDate,
         attendanceEndDate: updatedAssignment.attendanceEndDate
       }
+    };
+
+    console.log('📤 Sending response:', {
+      status: responseData.status,
+      message: responseData.message,
+      hasDates: {
+        startDate: !!responseData.data.attendanceStartDate,
+        endDate: !!responseData.data.attendanceEndDate
+      }
     });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('Error updating attendance date range:', error);

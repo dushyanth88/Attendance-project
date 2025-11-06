@@ -652,6 +652,7 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     }));
 
     // Prefer returning roll number if available
+    const Student = (await import('../models/Student.js')).default;
     let studentDoc;
     try {
       studentDoc = await Student.findOne({ userId: new mongoose.Types.ObjectId(studentId) });
@@ -669,9 +670,12 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       studentUserId: studentDoc?.userId
     });
 
-    // Get attendance start date from class assignment
+    // Get attendance start date and end date from class assignment (set by faculty)
     let attendanceStartDate = null;
+    let attendanceEndDate = null;
     if (studentDoc) {
+      const ClassAssignment = (await import('../models/ClassAssignment.js')).default;
+      
       // Extract semester number from string format like "Sem 7" -> 7
       let semesterNumber = studentDoc.semester;
       if (typeof semesterNumber === 'string' && semesterNumber.includes('Sem')) {
@@ -680,31 +684,100 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
         semesterNumber = parseInt(semesterNumber, 10);
       }
       
+      // Normalize year format - Student can have "4th" but ClassAssignment requires "4th Year"
+      let normalizedYear = studentDoc.year;
+      if (normalizedYear && !normalizedYear.includes('Year')) {
+        normalizedYear = `${normalizedYear} Year`;
+      }
+      
       console.log('🔍 Looking for class assignment:', {
         batch: studentDoc.batch,
         year: studentDoc.year,
+        normalizedYear: normalizedYear,
         semester: semesterNumber,
         section: studentDoc.section
       });
       
-      const classAssignment = await ClassAssignment.findOne({
+      // Try with normalized year first (most common case)
+      // Include departmentId if available, and sort by updatedAt to get the most recent
+      let classAssignment = await ClassAssignment.findOne({
         batch: studentDoc.batch,
-        year: studentDoc.year,
+        year: normalizedYear,
         semester: semesterNumber,
         section: studentDoc.section,
         active: true
-      });
+      })
+      .sort({ updatedAt: -1 }); // Get the most recently updated assignment
       
-      if (classAssignment && classAssignment.attendanceStartDate) {
-        attendanceStartDate = classAssignment.attendanceStartDate.toISOString().split('T')[0];
-        console.log('📅 Found attendance start date:', attendanceStartDate);
-      } else {
-        console.log('📅 No attendance start date found for student');
-        if (classAssignment) {
-          console.log('📅 Class assignment found but no start date set');
-        } else {
-          console.log('📅 No class assignment found');
+      // If not found, try with original year format
+      if (!classAssignment && studentDoc.year !== normalizedYear) {
+        console.log('🔍 Trying with original year format...');
+        classAssignment = await ClassAssignment.findOne({
+          batch: studentDoc.batch,
+          year: studentDoc.year,
+          semester: semesterNumber,
+          section: studentDoc.section,
+          active: true
+        })
+        .sort({ updatedAt: -1 }); // Get the most recently updated assignment
+      }
+      
+      // If still multiple, get the one with the most recent update
+      if (classAssignment) {
+        const allAssignments = await ClassAssignment.find({
+          batch: studentDoc.batch,
+          year: normalizedYear,
+          semester: semesterNumber,
+          section: studentDoc.section,
+          active: true
+        }).sort({ updatedAt: -1 });
+        
+        if (allAssignments.length > 1) {
+          console.log(`⚠️ Found ${allAssignments.length} active assignments, using most recent one`);
+          classAssignment = allAssignments[0]; // Get the most recently updated
         }
+      }
+      
+      if (classAssignment) {
+        console.log('✅ Found class assignment:', {
+          id: classAssignment._id,
+          batch: classAssignment.batch,
+          year: classAssignment.year,
+          semester: classAssignment.semester,
+          section: classAssignment.section,
+          attendanceStartDate: classAssignment.attendanceStartDate,
+          attendanceEndDate: classAssignment.attendanceEndDate
+        });
+        
+        // Process start date
+        if (classAssignment.attendanceStartDate) {
+          const dateValue = classAssignment.attendanceStartDate;
+          if (dateValue instanceof Date) {
+            attendanceStartDate = dateValue.toISOString().split('T')[0];
+          } else if (typeof dateValue === 'string') {
+            attendanceStartDate = new Date(dateValue).toISOString().split('T')[0];
+          } else {
+            attendanceStartDate = dateValue;
+          }
+          console.log('📅 Found attendance start date:', attendanceStartDate);
+        } else {
+          console.log('⚠️ Class assignment found but attendanceStartDate is null');
+        }
+        
+        // Process end date
+        if (classAssignment.attendanceEndDate) {
+          const dateValue = classAssignment.attendanceEndDate;
+          if (dateValue instanceof Date) {
+            attendanceEndDate = dateValue.toISOString().split('T')[0];
+          } else if (typeof dateValue === 'string') {
+            attendanceEndDate = new Date(dateValue).toISOString().split('T')[0];
+          } else {
+            attendanceEndDate = dateValue;
+          }
+          console.log('📅 Found attendance end date:', attendanceEndDate);
+        }
+      } else {
+        console.log('❌ No class assignment found for student');
       }
     }
 
@@ -714,7 +787,8 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       student_name: studentDoc?.name || null,
       attendance,
       overall_percentage: `${overallPercentage}%`,
-      attendance_start_date: attendanceStartDate
+      attendance_start_date: attendanceStartDate,
+      attendance_end_date: attendanceEndDate
     });
   } catch (error) {
     console.error('Get student attendance error:', error);

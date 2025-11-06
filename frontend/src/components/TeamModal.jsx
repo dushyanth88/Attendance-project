@@ -34,7 +34,25 @@ export default function TeamModal({ isOpen, onClose }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             {TEAM_INFO.team.map((member, idx) => (
               <div key={idx} className="rounded-xl shadow flex flex-col items-center p-4 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 border hover:scale-[1.03] transition-transform">
-                <div className="w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xl mb-2">{member.name[0]}</div>
+                {member.image ? (
+                  <img
+                    src={member.image}
+                    alt={member.name}
+                    className="w-14 h-14 rounded-full object-cover border-2 border-blue-600 mb-2 shadow-md"
+                    onError={(e) => {
+                      // Fallback to initial if image fails to load
+                      e.target.style.display = 'none';
+                      const fallback = e.target.nextSibling;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <div 
+                  className={`w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xl mb-2 ${member.image ? 'hidden' : ''}`}
+                  style={{ display: member.image ? 'none' : 'flex' }}
+                >
+                  {member.name[0]}
+                </div>
                 <p className="font-semibold text-gray-900 text-base">{member.name}</p>
                 <p className="text-sm text-gray-600">{member.role}</p>
               </div>

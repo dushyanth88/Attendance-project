@@ -9,6 +9,7 @@ const StudentDashboard = () => {
   const [overall, setOverall] = useState('-');
   const [history, setHistory] = useState([]);
   const [attendanceStartDate, setAttendanceStartDate] = useState(null);
+  const [attendanceEndDate, setAttendanceEndDate] = useState(null);
   const [rollNumber, setRollNumber] = useState(null);
   const [presentDays, setPresentDays] = useState(0);
   const [absentDays, setAbsentDays] = useState(0);
@@ -25,6 +26,55 @@ const StudentDashboard = () => {
   const [profileImage, setProfileImage] = useState(user?.profileImage);
   const [holidays, setHolidays] = useState([]);
   const [showImagePreview, setShowImagePreview] = useState(false);
+
+  // Calculate working days from attendance start date to today
+  const calculateWorkingDays = (startDate, endDate = null, holidaysList = []) => {
+    if (!startDate) return 0;
+
+    try {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      
+      const end = endDate ? new Date(endDate) : new Date();
+      end.setHours(23, 59, 59, 999);
+      
+      // Don't count future dates
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const actualEnd = end > today ? today : end;
+      
+      if (start > actualEnd) return 0;
+
+      // Create a set of holiday dates for quick lookup
+      const holidayDates = new Set(
+        holidaysList.map(holiday => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate.toISOString().split('T')[0];
+        })
+      );
+
+      let workingDays = 0;
+      const currentDate = new Date(start);
+      
+      while (currentDate <= actualEnd) {
+        const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
+        const dateString = currentDate.toISOString().split('T')[0];
+        
+        // Count only weekdays (Monday to Friday) and exclude holidays
+        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayDates.has(dateString)) {
+          workingDays++;
+        }
+        
+        // Move to next day
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      return workingDays;
+    } catch (error) {
+      console.error('Error calculating working days:', error);
+      return 0;
+    }
+  };
 
   const handleReasonSubmit = (record) => {
     setSelectedRecord({
@@ -146,11 +196,20 @@ const StudentDashboard = () => {
         
         const data = await res.json();
         console.log('📊 API Response data:', data);
+        console.log('📅 Attendance start date from API:', data.attendance_start_date);
+        console.log('📅 All response keys:', Object.keys(data));
         
         if (res.ok && data && Array.isArray(data.attendance)) {
           setHistory(data.attendance);
           setOverall(data.overall_percentage || '-');
-          setAttendanceStartDate(data.attendance_start_date || null);
+          
+          // Handle attendance start date - check multiple field names
+          const startDate = data.attendance_start_date || data.attendanceStartDate || data.classAssignment?.attendanceStartDate || null;
+          const endDate = data.attendance_end_date || data.attendanceEndDate || data.classAssignment?.attendanceEndDate || null;
+          console.log('📅 Setting attendance start date to:', startDate);
+          console.log('📅 Setting attendance end date to:', endDate);
+          setAttendanceStartDate(startDate);
+          setAttendanceEndDate(endDate);
           setRollNumber(data.roll_number || null);
           
           // Calculate actual attendance statistics
@@ -159,12 +218,12 @@ const StudentDashboard = () => {
           const odCount = data.attendance.filter(record => record.status === 'OD').length;
           const presentCount = data.attendance.filter(record => record.status === 'Present').length;
           const absentCount = data.attendance.filter(record => record.status === 'Absent').length;
-          const totalCount = presentCountWithOD + absentCount;
           
           setPresentDays(presentCount);
           setOdDays(odCount);
           setAbsentDays(absentCount);
-          setTotalWorkingDays(totalCount);
+          
+          // Note: totalWorkingDays will be calculated based on start date in useEffect
           
           const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
           const todayRec = data.attendance.find(a => a.date === today);
@@ -217,6 +276,41 @@ const StudentDashboard = () => {
     }
   }, [user]);
 
+  // Calculate total working days from attendance start date to today
+  useEffect(() => {
+    if (attendanceStartDate) {
+      const workingDays = calculateWorkingDays(attendanceStartDate, attendanceEndDate, holidays);
+      setTotalWorkingDays(workingDays);
+      console.log('📊 Calculated working days:', {
+        startDate: attendanceStartDate,
+        endDate: attendanceEndDate,
+        holidaysCount: holidays.length,
+        workingDays
+      });
+      
+      // Recalculate overall percentage with new working days
+      if (workingDays > 0) {
+        const presentCountWithOD = history.filter(record => record.status === 'Present' || record.status === 'OD').length;
+        const newPercentage = Math.round((presentCountWithOD / workingDays) * 100);
+        setOverall(`${newPercentage}%`);
+      } else {
+        setOverall('-');
+      }
+    } else {
+      // If no start date, use the count of attendance records as fallback
+      const totalCount = presentDays + absentDays + odDays;
+      setTotalWorkingDays(totalCount);
+      // Recalculate percentage with fallback count
+      if (totalCount > 0) {
+        const presentCountWithOD = presentDays + odDays;
+        const newPercentage = Math.round((presentCountWithOD / totalCount) * 100);
+        setOverall(`${newPercentage}%`);
+      } else {
+        setOverall('-');
+      }
+    }
+  }, [attendanceStartDate, attendanceEndDate, holidays, history, presentDays, absentDays, odDays]);
+
   // Real-time updates via SSE
   useEffect(() => {
     if (!user?.id || !localStorage.getItem('accessToken')) return;
@@ -244,15 +338,15 @@ const StudentDashboard = () => {
           const odCount = next.filter(record => record.status === 'OD').length;
           const presentCount = next.filter(record => record.status === 'Present').length;
           const absentCount = next.filter(record => record.status === 'Absent').length;
-          const totalCount = presentCountWithOD + absentCount;
           
           setPresentDays(presentCount);
           setOdDays(odCount);
           setAbsentDays(absentCount);
-          setTotalWorkingDays(totalCount);
           
-          // Update overall percentage (OD counted as Present)
-          const newPercentage = totalCount > 0 ? Math.round((presentCountWithOD / totalCount) * 100) : 0;
+          // Note: totalWorkingDays will be calculated based on start date in useEffect
+          // Update overall percentage using the calculated total working days
+          const calculatedWorkingDays = calculateWorkingDays(attendanceStartDate, attendanceEndDate, holidays);
+          const newPercentage = calculatedWorkingDays > 0 ? Math.round((presentCountWithOD / calculatedWorkingDays) * 100) : 0;
           setOverall(`${newPercentage}%`);
           
           return next;
@@ -351,10 +445,30 @@ const StudentDashboard = () => {
               )}
               <p className="text-sm text-blue-600">Department: {user?.department}</p>
               <p className="text-sm text-gray-500">Class: {user?.class || 'Not assigned'}</p>
-              {attendanceStartDate && (
-                <p className="text-sm text-green-600 font-medium mt-2">
-                  📅 Attendance Period Started: {new Date(attendanceStartDate).toLocaleDateString()}
-                </p>
+              {attendanceStartDate ? (
+                <div className="mt-2 p-2 bg-green-50 rounded-lg border border-green-200">
+                  <p className="text-sm text-green-700 font-semibold">
+                    📅 Attendance Period Started: {(() => {
+                      try {
+                        return new Date(attendanceStartDate).toLocaleDateString('en-US', { 
+                          weekday: 'short', 
+                          year: 'numeric', 
+                          month: 'short', 
+                          day: 'numeric' 
+                        });
+                      } catch (e) {
+                        console.error('Error formatting date:', e, attendanceStartDate);
+                        return attendanceStartDate;
+                      }
+                    })()}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <p className="text-sm text-yellow-700 font-medium">
+                    ⚠️ Attendance start date not set by class advisor
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -419,28 +533,90 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* Attendance Start Date Card */}
-        {attendanceStartDate && (
-          <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg shadow-md p-6 mb-8 border border-green-200">
-            <div className="flex items-center">
-              <span className="text-4xl mr-4">📅</span>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">Attendance Period</h3>
-                <p className="text-sm text-gray-600 mb-2">
-                  Your attendance tracking period has started
-                </p>
-                <p className="text-lg font-bold text-green-700">
-                  Started: {new Date(attendanceStartDate).toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </p>
-              </div>
+        {/* Attendance Period Card - Always visible */}
+        <div className={`rounded-lg shadow-lg p-6 mb-8 border-2 ${
+          attendanceStartDate 
+            ? 'bg-gradient-to-r from-green-50 to-blue-50 border-green-300' 
+            : 'bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-300'
+        }`}>
+          <div className="flex items-center">
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-4 rounded-xl mr-4 shadow-lg">
+              <span className="text-4xl">📅</span>
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Attendance Period</h3>
+              {attendanceStartDate ? (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center">
+                      <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                      <p className="text-base text-gray-700">
+                        <strong className="text-gray-900">Start Date:</strong>{' '}
+                        <span className="text-green-700 font-semibold">
+                          {(() => {
+                            try {
+                              return new Date(attendanceStartDate).toLocaleDateString('en-US', { 
+                                weekday: 'long', 
+                                year: 'numeric', 
+                                month: 'long', 
+                                day: 'numeric' 
+                              });
+                            } catch (e) {
+                              console.error('Error formatting attendance start date:', e, attendanceStartDate);
+                              return attendanceStartDate;
+                            }
+                          })()}
+                        </span>
+                      </p>
+                    </div>
+                    {attendanceEndDate ? (
+                      <div className="flex items-center">
+                        <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                        <p className="text-base text-gray-700">
+                          <strong className="text-gray-900">End Date:</strong>{' '}
+                          <span className="text-blue-700 font-semibold">
+                            {(() => {
+                              try {
+                                return new Date(attendanceEndDate).toLocaleDateString('en-US', { 
+                                  weekday: 'long', 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric' 
+                                });
+                              } catch (e) {
+                                console.error('Error formatting attendance end date:', e, attendanceEndDate);
+                                return attendanceEndDate;
+                              }
+                            })()}
+                          </span>
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center">
+                        <span className="w-3 h-3 bg-purple-500 rounded-full mr-2"></span>
+                        <p className="text-base text-gray-600">
+                          <strong>End Date:</strong> Not set (unlimited)
+                        </p>
+                      </div>
+                    )}
+                    <p className="text-sm text-gray-600 mt-3 pt-3 border-t border-gray-300">
+                      ✅ Your attendance tracking period is active. You can view your attendance records from the start date.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-600 mb-2">
+                    Attendance start date has not been configured yet
+                  </p>
+                  <p className="text-lg font-bold text-yellow-700">
+                    ⚠️ Please contact your class advisor to set the attendance period
+                  </p>
+                </>
+              )}
             </div>
           </div>
-        )}
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Holiday Information */}

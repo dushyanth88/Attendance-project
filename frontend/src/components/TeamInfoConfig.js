@@ -12,10 +12,10 @@ export const TEAM_INFO = {
   ],
   acknowledgments: 'We extend our gratitude to our mentor and department for their continuous guidance and support throughout the development of this project.',
   team: [
-    { name: 'Karthik', role: 'Full Stack Developer / Team Lead' },
-    { name: 'Dushyanth', role: 'Backend Developer' },
-    { name: 'Balaji', role: 'Frontend Developer' },
-    { name: 'Aravind', role: 'Database Engineer' },
-    { name: 'Kishore', role: 'UI/UX Designer' }
+    { name: 'Karthik', role: 'Full Stack Developer / Team Lead', image: '/team/karthik.jpg' },
+    { name: 'Dushyanth', role: 'Backend Developer', image: '/team/dushyanth.jpg' },
+    { name: 'Balaji', role: 'Frontend Developer', image: '/team/balaji.jpg' },
+    { name: 'Aravind', role: 'Database Engineer', image: '/team/aravind.jpg' },
+    { name: 'Kishore', role: 'UI/UX Designer', image: '/team/kishore.jpg' }
   ]
 };

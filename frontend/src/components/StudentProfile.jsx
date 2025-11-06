@@ -14,6 +14,59 @@ const StudentProfile = () => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [showImageModal, setShowImageModal] = useState(false);
+  const [attendanceStartDate, setAttendanceStartDate] = useState(null);
+  const [attendanceEndDate, setAttendanceEndDate] = useState(null);
+  const [holidays, setHolidays] = useState([]);
+  const [calculatedWorkingDays, setCalculatedWorkingDays] = useState(0);
+
+  // Calculate working days from attendance start date to today
+  const calculateWorkingDays = (startDate, endDate = null, holidaysList = []) => {
+    if (!startDate) return 0;
+
+    try {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      
+      const end = endDate ? new Date(endDate) : new Date();
+      end.setHours(23, 59, 59, 999);
+      
+      // Don't count future dates
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const actualEnd = end > today ? today : end;
+      
+      if (start > actualEnd) return 0;
+
+      // Create a set of holiday dates for quick lookup
+      const holidayDates = new Set(
+        holidaysList.map(holiday => {
+          const holidayDate = new Date(holiday.date);
+          return holidayDate.toISOString().split('T')[0];
+        })
+      );
+
+      let workingDays = 0;
+      const currentDate = new Date(start);
+      
+      while (currentDate <= actualEnd) {
+        const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
+        const dateString = currentDate.toISOString().split('T')[0];
+        
+        // Count only weekdays (Monday to Friday) and exclude holidays
+        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayDates.has(dateString)) {
+          workingDays++;
+        }
+        
+        // Move to next day
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      return workingDays;
+    } catch (error) {
+      console.error('Error calculating working days:', error);
+      return 0;
+    }
+  };
 
   useEffect(() => {
     fetchStudentProfile();
@@ -25,6 +78,57 @@ const StudentProfile = () => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [loading, studentData]);
+
+  // Fetch holidays
+  useEffect(() => {
+    const fetchHolidays = async () => {
+      try {
+        const response = await apiFetch({
+          url: '/api/holidays/student',
+          method: 'GET'
+        });
+        
+        if (response.data?.status === 'success') {
+          setHolidays(response.data.data || []);
+          console.log('🎉 Holidays fetched:', response.data.data);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching holidays:', error);
+      }
+    };
+    
+    if (studentData?.department) {
+      fetchHolidays();
+    }
+  }, [studentData?.department]);
+
+  // Calculate total working days from attendance start date to today
+  useEffect(() => {
+    console.log('🔄 Recalculating working days:', {
+      hasStartDate: !!attendanceStartDate,
+      startDate: attendanceStartDate,
+      endDate: attendanceEndDate,
+      holidaysCount: holidays.length,
+      backendTotalDays: attendanceStats?.totalDays
+    });
+    
+    if (attendanceStartDate) {
+      const workingDays = calculateWorkingDays(attendanceStartDate, attendanceEndDate, holidays);
+      setCalculatedWorkingDays(workingDays);
+      console.log('📊 Calculated working days for profile:', {
+        startDate: attendanceStartDate,
+        endDate: attendanceEndDate,
+        holidaysCount: holidays.length,
+        calculatedWorkingDays: workingDays,
+        backendTotalDays: attendanceStats?.totalDays
+      });
+    } else {
+      // Fallback to backend totalDays if no start date
+      const fallbackDays = attendanceStats?.totalDays || 0;
+      setCalculatedWorkingDays(fallbackDays);
+      console.log('⚠️ No start date, using backend totalDays:', fallbackDays);
+    }
+  }, [attendanceStartDate, attendanceEndDate, holidays, attendanceStats?.totalDays]);
 
   const fetchStudentProfile = async () => {
     try {
@@ -40,6 +144,22 @@ const StudentProfile = () => {
         setAttendanceStats(responseData.data.attendanceStats);
         setMonthlyAttendance(responseData.data.monthlyAttendance);
         setRecentAttendance(responseData.data.recentAttendance);
+        
+        // Extract attendance dates from attendanceStats
+        console.log('📅 Attendance stats from API:', responseData.data.attendanceStats);
+        if (responseData.data.attendanceStats?.attendanceStartDate) {
+          console.log('✅ Setting attendance start date:', responseData.data.attendanceStats.attendanceStartDate);
+          setAttendanceStartDate(responseData.data.attendanceStats.attendanceStartDate);
+        } else {
+          console.log('⚠️ No attendance start date in response');
+          setAttendanceStartDate(null);
+        }
+        if (responseData.data.attendanceStats?.attendanceEndDate) {
+          console.log('✅ Setting attendance end date:', responseData.data.attendanceStats.attendanceEndDate);
+          setAttendanceEndDate(responseData.data.attendanceStats.attendanceEndDate);
+        } else {
+          setAttendanceEndDate(null);
+        }
       } else {
         throw new Error(responseData.message || 'Failed to fetch student profile');
       }
@@ -165,7 +285,7 @@ const StudentProfile = () => {
         <div className="text-center">
           <div className="text-6xl mb-4">👤</div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Student Not Found</h2>
-          <p className="text-gray-600 mb-4">The requested student profile could not be found.</p>
+          <p className="text-gray-600 mb-4">The requested student profile couldbe found.</p>
           <button
             onClick={() => navigate(-1)}
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
@@ -306,14 +426,6 @@ const StudentProfile = () => {
                     <span className="text-2xl font-bold text-red-600">{attendanceStats.absentDays}</span>
                   </div>
                   
-                  <div className="flex justify-between items-center p-3 bg-yellow-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className="text-2xl mr-3">❔</span>
-                      <span className="font-medium text-yellow-800">Not Marked</span>
-                    </div>
-                    <span className="text-2xl font-bold text-yellow-600">{attendanceStats.notMarkedDays || 0}</span>
-                  </div>
-                  
                   <div className="flex justify-between items-center p-3 bg-amber-50 rounded-lg">
                     <div className="flex items-center">
                       <span className="text-2xl mr-3">🎉</span>
@@ -327,7 +439,9 @@ const StudentProfile = () => {
                       <span className="text-2xl mr-3">📅</span>
                       <span className="font-medium text-blue-800">Total Working Days</span>
                     </div>
-                    <span className="text-2xl font-bold text-blue-600">{attendanceStats.totalDays}</span>
+                    <span className="text-2xl font-bold text-blue-600">
+                      {attendanceStartDate ? calculatedWorkingDays : (attendanceStats?.totalDays || 0)}
+                    </span>
                   </div>
                   
                   <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg">
@@ -335,7 +449,7 @@ const StudentProfile = () => {
                       <span className="text-2xl mr-3">📊</span>
                       <span className="font-medium text-purple-800">Attendance %</span>
                     </div>
-                    <span className="text-2xl font-bold text-purple-600">{attendanceStats.attendancePercentage}%</span>
+                    <span className="text-2xl font-bold text-purple-600">{attendanceStats?.attendancePercentage ?? 0}%</span>
                   </div>
                 </div>
 
@@ -343,15 +457,15 @@ const StudentProfile = () => {
                 <div className="mt-6">
                   <div className="flex justify-between text-sm text-gray-600 mb-2">
                     <span>Attendance Progress</span>
-                    <span>{attendanceStats.attendancePercentage}%</span>
+                    <span>{attendanceStats?.attendancePercentage ?? 0}%</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3">
                     <div
                       className={`h-3 rounded-full transition-all duration-300 ${
-                        attendanceStats.attendancePercentage >= 75 ? 'bg-green-500' :
-                        attendanceStats.attendancePercentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                        (attendanceStats?.attendancePercentage ?? 0) >= 75 ? 'bg-green-500' :
+                        (attendanceStats?.attendancePercentage ?? 0) >= 50 ? 'bg-yellow-500' : 'bg-red-500'
                       }`}
-                      style={{ width: `${attendanceStats.attendancePercentage}%` }}
+                      style={{ width: `${attendanceStats?.attendancePercentage ?? 0}%` }}
                     ></div>
                   </div>
                 </div>

@@ -1436,6 +1436,93 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       dateFilter = { $gte: academicYearStart, $lte: academicYearEnd };
     }
 
+    // Get attendance start date from ClassAssignment (set by faculty in Attendance Date section)
+    const ClassAssignment = (await import('../models/ClassAssignment.js')).default;
+    let attendanceStartDate = null;
+    
+    // Extract semester number from string format like "Sem 7" -> 7
+    let semesterNumber = student.semester;
+    if (typeof semesterNumber === 'string' && semesterNumber.includes('Sem')) {
+      semesterNumber = parseInt(semesterNumber.replace('Sem ', ''), 10);
+    } else if (typeof semesterNumber === 'string') {
+      semesterNumber = parseInt(semesterNumber, 10);
+    }
+    
+    // Normalize year format - Student can have "4th" but ClassAssignment requires "4th Year"
+    let normalizedYear = student.year;
+    if (normalizedYear && !normalizedYear.includes('Year')) {
+      normalizedYear = `${normalizedYear} Year`;
+    }
+    
+    console.log('📅 Looking for ClassAssignment:', {
+      batch: student.batch,
+      year: student.year,
+      normalizedYear: normalizedYear,
+      semester: semesterNumber,
+      section: student.section
+    });
+    
+    // Get the most recently updated assignment (in case there are multiple)
+    // Use find().sort().limit(1) to get the most recent one
+    let classAssignment = null;
+    const assignments = await ClassAssignment.find({
+      batch: student.batch,
+      year: normalizedYear,
+      semester: semesterNumber,
+      section: student.section,
+      active: true
+    })
+    .sort({ updatedAt: -1 })
+    .limit(1);
+    
+    if (assignments.length > 0) {
+      classAssignment = assignments[0];
+    }
+    
+    // If not found with normalized year, try original format
+    if (!classAssignment && student.year !== normalizedYear) {
+      console.log('📅 Trying with original year format...');
+      const assignmentsAlt = await ClassAssignment.find({
+        batch: student.batch,
+        year: student.year,
+        semester: semesterNumber,
+        section: student.section,
+        active: true
+      })
+      .sort({ updatedAt: -1 })
+      .limit(1);
+      
+      if (assignmentsAlt.length > 0) {
+        classAssignment = assignmentsAlt[0];
+      }
+    }
+    
+    let attendanceEndDate = null;
+    if (classAssignment) {
+      console.log('✅ Class assignment found:', {
+        id: classAssignment._id,
+        attendanceStartDate: classAssignment.attendanceStartDate,
+        attendanceEndDate: classAssignment.attendanceEndDate,
+        updatedAt: classAssignment.updatedAt
+      });
+      
+      if (classAssignment.attendanceStartDate) {
+        attendanceStartDate = new Date(classAssignment.attendanceStartDate);
+        attendanceStartDate.setHours(0, 0, 0, 0);
+        console.log('✅ Found attendance start date:', attendanceStartDate.toISOString().split('T')[0]);
+        
+        if (classAssignment.attendanceEndDate) {
+          attendanceEndDate = new Date(classAssignment.attendanceEndDate);
+          attendanceEndDate.setHours(23, 59, 59, 999);
+          console.log('✅ Found attendance end date:', attendanceEndDate.toISOString().split('T')[0]);
+        }
+      } else {
+        console.log('⚠️ ClassAssignment found but attendanceStartDate is null');
+      }
+    } else {
+      console.log('⚠️ No ClassAssignment found for student');
+    }
+
     // Get attendance records for the student
     // Use the userId from the student document for attendance queries
     const studentUserId = student.userId._id;
@@ -1569,7 +1656,9 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           absentDays,
           notMarkedDays,
           attendancePercentage,
-          holidayCount: holidays.length
+          holidayCount: holidays.length,
+          attendanceStartDate: attendanceStartDate ? attendanceStartDate.toISOString().split('T')[0] : null,
+          attendanceEndDate: attendanceEndDate ? attendanceEndDate.toISOString().split('T')[0] : null
         },
         // Monthly attendance data for calendar
         monthlyAttendance,

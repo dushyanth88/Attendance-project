@@ -77,13 +77,15 @@ const DepartmentAttendance = () => {
   const overallStats = departmentStats.reduce((acc, dept) => {
     acc.total += dept.totalStudents;
     acc.present += dept.presentStudents;
+    acc.od += dept.odStudents || 0;
     acc.absent += dept.absentStudents;
     acc.notMarked += dept.notMarkedStudents;
     return acc;
-  }, { total: 0, present: 0, absent: 0, notMarked: 0 });
+  }, { total: 0, present: 0, od: 0, absent: 0, notMarked: 0 });
 
+  // OD students are considered present for attendance percentage
   const overallPercentage = overallStats.total > 0 
-    ? Math.round((overallStats.present / overallStats.total) * 100) 
+    ? Math.round(((overallStats.present + overallStats.od) / overallStats.total) * 100) 
     : 0;
 
   return (
@@ -131,7 +133,7 @@ const DepartmentAttendance = () => {
               <p className="text-white text-opacity-90 text-sm">Attendance</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
             <div className="bg-white bg-opacity-20 rounded-lg p-3">
               <div className="text-sm text-white text-opacity-90">Total Students</div>
               <div className="text-2xl font-bold">{overallStats.total}</div>
@@ -139,6 +141,10 @@ const DepartmentAttendance = () => {
             <div className="bg-white bg-opacity-20 rounded-lg p-3">
               <div className="text-sm text-white text-opacity-90">Present</div>
               <div className="text-2xl font-bold text-green-200">{overallStats.present}</div>
+            </div>
+            <div className="bg-white bg-opacity-20 rounded-lg p-3">
+              <div className="text-sm text-white text-opacity-90">OD</div>
+              <div className="text-2xl font-bold text-blue-200">{overallStats.od}</div>
             </div>
             <div className="bg-white bg-opacity-20 rounded-lg p-3">
               <div className="text-sm text-white text-opacity-90">Absent</div>
@@ -189,6 +195,11 @@ const DepartmentAttendance = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Present</span>
                   <span className="font-semibold text-green-600">{dept.presentStudents}</span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">📋 OD</span>
+                  <span className="font-semibold text-blue-600">{dept.odStudents || 0}</span>
                 </div>
                 
                 <div className="flex justify-between items-center">

@@ -1422,7 +1422,8 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
   try {
     const Student = (await import('../models/Student.js')).default;
     const Attendance = (await import('../models/Attendance.js')).default;
-    const today = new Date().toISOString().split('T')[0];
+    const { getCurrentISTDate } = await import('../utils/istTimezone.js');
+    const todayISTString = getCurrentISTDate(); // Get today's date in IST timezone
 
     // Get all departments
     const departments = await Student.distinct('department');
@@ -1432,10 +1433,10 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
       .select('department userId')
       .lean();
 
-    // Get today's attendance records
+    // Get today's attendance records using localDate for exact date matching
     const userIds = studentsByDept.map(s => s.userId?.toString()).filter(Boolean);
     const attendanceRecords = await Attendance.find({ 
-      date: today, 
+      localDate: todayISTString, // Use localDate for exact date matching
       studentId: { $in: userIds } 
     }).lean();
 
@@ -1455,6 +1456,7 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
       const deptStudentIds = deptStudents.map(s => s.userId?.toString()).filter(Boolean);
       
       let presentCount = 0;
+      let odCount = 0;
       let absentCount = 0;
       let notMarkedCount = 0;
 
@@ -1462,6 +1464,8 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
         const status = attendanceMap.get(studentId);
         if (status === 'Present') {
           presentCount++;
+        } else if (status === 'OD') {
+          odCount++;
         } else if (status === 'Absent') {
           absentCount++;
         } else {
@@ -1470,18 +1474,21 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
       });
 
       const totalStudents = deptStudents.length;
+      // OD students are considered present for attendance percentage
+      const presentWithOD = presentCount + odCount;
       const attendancePercentage = totalStudents > 0 
-        ? Math.round((presentCount / totalStudents) * 100) 
+        ? Math.round((presentWithOD / totalStudents) * 100) 
         : 0;
 
       departmentStats.push({
         department: dept,
         totalStudents,
         presentStudents: presentCount,
+        odStudents: odCount,
         absentStudents: absentCount,
         notMarkedStudents: notMarkedCount,
         attendancePercentage,
-        date: today
+        date: todayISTString
       });
     }
 
@@ -1492,7 +1499,7 @@ router.get('/attendance-by-department', principalAndAbove, async (req, res) => {
       success: true,
       data: {
         departments: departmentStats,
-        date: today,
+        date: todayISTString,
         lastUpdated: new Date().toISOString()
       }
     });

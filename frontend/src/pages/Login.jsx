@@ -66,17 +66,31 @@ const Login = () => {
   const selectedRole = roles.find(role => role.value === formData.role);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800 flex items-center justify-center p-2 sm:p-4">
+    <div 
+      className="min-h-screen flex items-center justify-center p-2 sm:p-4 relative"
+      style={{
+        backgroundImage: 'url(/college-image.jpg)',
+        backgroundSize: 'contain',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed'
+      }}
+    >
+      {/* Overlay for readability - gradient with transparency */}
+      <div className="absolute inset-0 bg-gradient-to-br from-gray-900/60 via-gray-800/60 to-gray-900/60"></div>
+      
+      {/* Content wrapper with relative positioning */}
+      <div className="relative z-10 w-full">
       {/* Fixed top bar with college name (stays on scroll) */}
-      <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-indigo-700/80 via-purple-700/80 to-pink-700/80 backdrop-blur-sm shadow-md">
+      <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-indigo-700/80 via-purple-700/80 to-pink-700/80 backdrop-blur-sm shadow-md animate-slideDown">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 flex items-center justify-center gap-2 sm:gap-3">
           <img
             src="/college-logo.png"
             alt="College Logo"
-            className="h-6 sm:h-8 md:h-9 w-auto object-contain shadow-sm"
+            className="h-6 sm:h-8 md:h-9 w-auto object-contain shadow-sm animate-pulse"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
-          <h1 className="py-3 text-white font-extrabold tracking-wide text-center text-sm sm:text-base md:text-lg lg:text-xl xl:text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
+          <h1 className="py-3 text-white font-extrabold tracking-wide text-center text-sm sm:text-base md:text-lg lg:text-xl xl:text-2xl whitespace-nowrap overflow-hidden text-ellipsis animate-fadeIn">
             Er. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING (Autonomous)
           </h1>
         </div>
@@ -84,37 +98,38 @@ const Login = () => {
 
       <div className="w-full max-w-md mx-auto flex flex-col items-center pt-16">
         {/* Logo and Title */}
-        <div className="flex flex-col items-center justify-center mb-5 sm:mb-6 w-full">
-          <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-white rounded-full mb-3 sm:mb-4 shadow-xl">
-            <span className="text-2xl sm:text-3xl">🎓</span>
+        <div className="flex flex-col items-center justify-center mb-5 sm:mb-6 w-full animate-fadeInUp">
+          <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-white rounded-full mb-3 sm:mb-4 shadow-xl animate-float hover:scale-110 transition-transform duration-300">
+            <span className="text-2xl sm:text-3xl animate-bounce-slow">🎓</span>
           </div>
           {/* Title moved to fixed top bar; keep subtle caption under logo only for spacing */}
-          <p className="text-indigo-100/90 text-[10px] sm:text-xs md:text-sm font-semibold mb-2 sm:mb-3 tracking-[0.2em] uppercase text-center w-full select-none">
+          <p className="text-indigo-100/90 text-[10px] sm:text-xs md:text-sm font-semibold mb-2 sm:mb-3 tracking-[0.2em] uppercase text-center w-full select-none animate-fadeIn delay-100">
             Welcome to the Attendance Portal
           </p>
-          <p className="text-blue-100 text-sm sm:text-base font-medium text-center mt-1 w-full">Sign in to your account</p>
+          <p className="text-blue-100 text-sm sm:text-base font-medium text-center mt-1 w-full animate-fadeIn delay-200">Sign in to your account</p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8">
+        <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 lg:p-8 animate-fadeInUp delay-300 hover:shadow-3xl transition-shadow duration-300">
           {/* Role Selector */}
           <div className="mb-4 sm:mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
               Select Your Role
             </label>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 sm:gap-2">
-              {roles.map((role) => (
+              {roles.map((role, idx) => (
                 <button
                   key={role.value}
                   type="button"
                   onClick={() => setFormData({ ...formData, role: role.value })}
-                  className={`p-2 sm:p-3 rounded-lg text-center transition-all duration-200 min-h-[44px] ${
+                  className={`p-2 sm:p-3 rounded-lg text-center transition-all duration-300 min-h-[44px] animate-fadeInUp hover:scale-110 active:scale-95 ${
                     formData.role === role.value
-                      ? `bg-gradient-to-r ${role.color} text-white shadow-lg transform scale-105`
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      ? `bg-gradient-to-r ${role.color} text-white shadow-lg transform scale-105 animate-pulse-slow`
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:shadow-md'
                   }`}
+                  style={{ animationDelay: `${(idx + 1) * 100}ms` }}
                 >
-                  <div className="text-sm sm:text-lg mb-1">{role.icon}</div>
+                  <div className="text-sm sm:text-lg mb-1 transition-transform duration-300 hover:scale-125">{role.icon}</div>
                   <div className="text-xs font-medium leading-tight">{role.label}</div>
                 </button>
               ))}
@@ -123,12 +138,12 @@ const Login = () => {
 
           {/* Selected Role Display */}
           {selectedRole && (
-            <div className={`mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg bg-gradient-to-r ${selectedRole.color} text-white`}>
+            <div className={`mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg bg-gradient-to-r ${selectedRole.color} text-white animate-slideInLeft hover:shadow-xl transition-all duration-300`}>
               <div className="flex items-center">
-                <span className="text-xl sm:text-2xl mr-2 sm:mr-3">{selectedRole.icon}</span>
+                <span className="text-xl sm:text-2xl mr-2 sm:mr-3 animate-bounce-slow">{selectedRole.icon}</span>
                 <div>
-                  <h3 className="font-semibold text-sm sm:text-base">Signing in as {selectedRole.label}</h3>
-                  <p className="text-xs sm:text-sm opacity-90">Access your {selectedRole.label.toLowerCase()} dashboard</p>
+                  <h3 className="font-semibold text-sm sm:text-base animate-fadeIn">Signing in as {selectedRole.label}</h3>
+                  <p className="text-xs sm:text-sm opacity-90 animate-fadeIn delay-100">Access your {selectedRole.label.toLowerCase()} dashboard</p>
                 </div>
               </div>
             </div>
@@ -136,9 +151,9 @@ const Login = () => {
 
           {/* Error Message */}
           {error && (
-            <div className="mb-4 p-3 sm:p-4 bg-red-50 border-l-4 border-red-400 rounded-lg">
+            <div className="mb-4 p-3 sm:p-4 bg-red-50 border-l-4 border-red-400 rounded-lg animate-shake">
               <div className="flex items-start">
-                <span className="text-red-400 mr-2 text-sm sm:text-base">⚠️</span>
+                <span className="text-red-400 mr-2 text-sm sm:text-base animate-pulse">⚠️</span>
                 <div>
                   <h4 className="text-red-800 font-medium text-sm sm:text-base">Login Failed</h4>
                   <p className="text-red-700 text-xs sm:text-sm mt-1">{error}</p>
@@ -160,7 +175,7 @@ const Login = () => {
                 value={formData.email}
                 onChange={handleChange}
                 required
-                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-sm sm:text-base animate-fadeInUp delay-400 focus:scale-[1.02] focus:shadow-md"
                 placeholder="Enter your email"
               />
             </div>
@@ -177,15 +192,15 @@ const Login = () => {
                   value={formData.password}
                   onChange={handleChange}
                   required
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 pr-10 sm:pr-12 text-sm sm:text-base"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 pr-10 sm:pr-12 text-sm sm:text-base animate-fadeInUp delay-500 focus:scale-[1.02] focus:shadow-md"
                   placeholder="Enter your password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 p-1"
+                  className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 p-1 transition-all duration-300 hover:scale-125 active:scale-95"
                 >
-                  <span className="text-sm sm:text-base">{showPassword ? '🙈' : '👁️'}</span>
+                  <span className="text-sm sm:text-base transition-transform duration-300 hover:rotate-12">{showPassword ? '🙈' : '👁️'}</span>
                 </button>
               </div>
             </div>
@@ -203,10 +218,10 @@ const Login = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-2.5 sm:py-3 px-4 rounded-lg font-semibold text-white transition-all duration-200 min-h-[44px] ${
+              className={`w-full py-2.5 sm:py-3 px-4 rounded-lg font-semibold text-white transition-all duration-300 min-h-[44px] animate-fadeInUp delay-600 ${
                 isLoading
                   ? 'bg-gray-400 cursor-not-allowed'
-                  : `bg-gradient-to-r ${selectedRole?.color || 'from-blue-500 to-purple-500'} hover:shadow-lg transform hover:scale-105`
+                  : `bg-gradient-to-r ${selectedRole?.color || 'from-blue-500 to-purple-500'} hover:shadow-xl transform hover:scale-105 active:scale-95 hover:brightness-110`
               }`}
             >
               {isLoading ? (
@@ -221,7 +236,7 @@ const Login = () => {
           </form>
 
           {/* Demo Credentials */}
-          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-gray-50 rounded-lg">
+          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-gray-50 rounded-lg animate-fadeInUp delay-700 hover:bg-gray-100 transition-colors duration-300">
             <h4 className="text-xs sm:text-sm font-medium text-gray-700 mb-2">Demo Credentials:</h4>
             <div className="text-xs text-gray-600 space-y-1 overflow-x-auto">
               <div className="break-all"><strong>Admin:</strong> admin@attendance.com / password123</div>
@@ -235,6 +250,7 @@ const Login = () => {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
