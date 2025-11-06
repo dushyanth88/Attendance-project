@@ -1423,6 +1423,11 @@ router.put('/students/:id', authenticate, facultyAndAbove, [
     }
 
     // Check if faculty is class advisor for this student's batch/year/semester/section
+    // Convert semester from "Sem 7" format to number 7
+    const semesterNumber = typeof student.semester === 'string' && student.semester.startsWith('Sem ') 
+      ? parseInt(student.semester.replace('Sem ', '')) 
+      : student.semester;
+    
     const faculty = await Faculty.findOne({ 
       userId: currentUser._id,
       'assignedClasses.batch': student.batch,
@@ -1441,7 +1446,7 @@ router.put('/students/:id', authenticate, facultyAndAbove, [
     }
 
     // Check for email conflicts (if email is being changed)
-    if (email && email !== student.email) {
+    if (email && email.toLowerCase() !== (student.email || '').toLowerCase()) {
       const existingUser = await User.findOne({ 
         email: email.toLowerCase(),
         _id: { $ne: student.userId }
@@ -1498,7 +1503,7 @@ router.put('/students/:id', authenticate, facultyAndAbove, [
       batch: student.batch,
       year: student.year,
       semester: student.semester,
-      section: faculty?.section || 'A'
+      section: student.section || 'A'
     };
 
     res.json({
@@ -1508,6 +1513,14 @@ router.put('/students/:id', authenticate, facultyAndAbove, [
     });
   } catch (error) {
     console.error('Error updating student:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      keyPattern: error.keyPattern,
+      keyValue: error.keyValue
+    });
     
     // Handle specific error types
     if (error.name === 'ValidationError') {

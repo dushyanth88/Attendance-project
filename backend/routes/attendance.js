@@ -9,6 +9,8 @@ import ClassAssignment from '../models/ClassAssignment.js';
 import { authenticate, facultyAndAbove, hodAndAbove, principalAndAbove, verifyToken } from '../middleware/auth.js';
 import ClassAttendance from '../models/ClassAttendance.js';
 import { getCurrentISTDate, getISTStartOfDay, getISTEndOfDay, getAttendanceDate, createISTExactDateFilter, getCurrentISTTimestamp } from '../utils/istTimezone.js';
+import PDFDocument from 'pdfkit';
+import ExcelJS from 'exceljs';
 
 const router = express.Router();
 
@@ -781,6 +783,46 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       }
     }
 
+    // Fetch holidays for the student's department in the attendance period
+    let holidays = [];
+    if (studentDoc?.department) {
+      const Holiday = (await import('../models/Holiday.js')).default;
+      let holidayFilter = {
+        department: studentDoc.department,
+        isDeleted: false
+      };
+      
+      // If we have attendance dates, filter holidays to that range
+      if (attendanceStartDate || attendanceEndDate) {
+        holidayFilter.holidayDate = {};
+        if (attendanceStartDate) {
+          holidayFilter.holidayDate.$gte = attendanceStartDate;
+        }
+        const endDate = attendanceEndDate || new Date().toISOString().split('T')[0];
+        holidayFilter.holidayDate.$lte = endDate;
+      } else {
+        // If no date range, get all holidays (or limit to current academic year)
+        const today = new Date().toISOString().split('T')[0];
+        holidayFilter.holidayDate = { $gte: today }; // At least future holidays
+      }
+      
+      const holidayDocs = await Holiday.find(holidayFilter)
+        .select('holidayDate reason')
+        .sort({ holidayDate: 1 })
+        .limit(100);
+      
+      holidays = holidayDocs.map(holiday => ({
+        date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
+        reason: holiday.reason || 'Holiday'
+      }));
+      
+      console.log('🎉 Holidays fetched for attendance:', {
+        department: studentDoc.department,
+        dateFilter: holidayFilter.holidayDate,
+        holidayCount: holidays.length
+      });
+    }
+
     res.status(200).json({
       student_id: studentIdentifier,
       roll_number: studentDoc?.rollNumber || null,
@@ -788,7 +830,8 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       attendance,
       overall_percentage: `${overallPercentage}%`,
       attendance_start_date: attendanceStartDate,
-      attendance_end_date: attendanceEndDate
+      attendance_end_date: attendanceEndDate,
+      holidays: holidays // Include holidays in response
     });
   } catch (error) {
     console.error('Get student attendance error:', error);
@@ -2109,6 +2152,562 @@ router.get('/report', authenticate, facultyAndAbove, async (req, res) => {
       success: false,
       message: 'Server error while generating report'
     });
+  }
+});
+
+// @desc    Generate attendance report (Excel or PDF) for faculty's assigned class
+// @route   POST /api/attendance/generate-report
+// @access  Faculty and above
+router.post('/generate-report', authenticate, facultyAndAbove, [
+  body('reportType').isIn(['absentees', 'full']).withMessage('Report type must be "absentees" or "full"'),
+  body('format').isIn(['excel', 'pdf']).withMessage('Format must be "excel" or "pdf"'),
+  body('date').optional().custom((value) => {
+    if (!value) return true; // Optional field
+    const date = new Date(value);
+    return !isNaN(date.getTime());
+  }).withMessage('Date must be a valid date format')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { reportType, format, date } = req.body;
+    
+    // Validate and normalize date if provided
+    let normalizedDate = null;
+    if (date) {
+      const dateObj = new Date(date);
+      if (isNaN(dateObj.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format'
+        });
+      }
+      normalizedDate = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD format
+    }
+    const currentUser = req.user;
+
+    // Get faculty's assigned class - check assignedClasses array first, then legacy fields
+    const faculty = await Faculty.findOne({
+      userId: currentUser._id,
+      is_class_advisor: true,
+      status: 'active'
+    }).select('batch year semester section department assignedClasses');
+
+    if (!faculty) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not assigned to any class as a class advisor'
+      });
+    }
+
+    // Get class info from assignedClasses array (new structure) or legacy fields
+    let batch, year, semester, section, department;
+    
+    if (faculty.assignedClasses && faculty.assignedClasses.length > 0) {
+      // Use the first active assignment from assignedClasses
+      const activeAssignment = faculty.assignedClasses.find(cls => cls.active);
+      if (activeAssignment) {
+        batch = activeAssignment.batch;
+        year = activeAssignment.year;
+        semester = activeAssignment.semester;
+        section = activeAssignment.section;
+        department = faculty.department;
+      } else {
+        // No active assignment, use legacy fields
+        batch = faculty.batch;
+        year = faculty.year;
+        semester = faculty.semester;
+        section = faculty.section;
+        department = faculty.department;
+      }
+    } else {
+      // Use legacy fields
+      batch = faculty.batch;
+      year = faculty.year;
+      semester = faculty.semester;
+      section = faculty.section;
+      department = faculty.department;
+    }
+
+    // If still no section, try to get from ClassAssignment
+    if (!section) {
+      const classAssignment = await ClassAssignment.findOne({
+        facultyId: currentUser._id,
+        active: true
+      }).select('section').sort({ createdAt: -1 });
+      
+      if (classAssignment) {
+        section = classAssignment.section;
+      }
+    }
+
+    if (!batch || !year || !semester || !section || !department) {
+      return res.status(403).json({
+        success: false,
+        message: 'Class assignment information is incomplete. Please contact administrator.'
+      });
+    }
+
+    const normalizedYear = normalizeYear(year);
+    const normalizedSemester = normalizeSemester(semester);
+    
+    console.log('📊 Report generation - Using class:', { batch, year, semester, section, department });
+    
+    // Extract numeric semester for ClassAssignment query
+    let semesterNumber = semester;
+    if (typeof semester === 'string' && semester.includes('Sem')) {
+      const match = semester.match(/\d+/);
+      semesterNumber = match ? parseInt(match[0], 10) : parseInt(semester, 10);
+    } else if (typeof semester === 'string') {
+      semesterNumber = parseInt(semester, 10);
+    }
+
+    // Get class assignment to find attendance start date
+    let classAssignment = await ClassAssignment.findOne({
+      batch,
+      year: normalizedYear,
+      semester: semesterNumber,
+      section,
+      active: true
+    }).select('attendanceStartDate attendanceEndDate');
+
+    // If not found, try with facultyId
+    if (!classAssignment) {
+      classAssignment = await ClassAssignment.findOne({
+        facultyId: currentUser._id,
+        batch,
+        year: normalizedYear,
+        semester: semesterNumber,
+        section,
+        active: true
+      }).select('attendanceStartDate attendanceEndDate');
+    }
+
+    // Determine the date range for calculating total absent days
+    let attendanceStartDate = null;
+    if (classAssignment && classAssignment.attendanceStartDate) {
+      attendanceStartDate = new Date(classAssignment.attendanceStartDate);
+      attendanceStartDate.setHours(0, 0, 0, 0);
+    } else {
+      // Fallback: use the earliest attendance record date for this class if no start date is set
+      const earliestRecord = await Attendance.findOne({
+        classId: `${batch}_${normalizedYear}_${normalizedSemester}${section ? `_${section}` : ''}`
+      }).sort({ date: 1 }).select('date');
+      
+      if (earliestRecord && earliestRecord.date) {
+        attendanceStartDate = new Date(earliestRecord.date);
+        attendanceStartDate.setHours(0, 0, 0, 0);
+        console.log('📅 Using earliest attendance record date as start date:', attendanceStartDate.toISOString().split('T')[0]);
+      }
+    }
+    
+    // End date for calculation: use selected date if provided, otherwise use today
+    let calculationEndDate = normalizedDate ? new Date(normalizedDate) : new Date();
+    calculationEndDate.setHours(23, 59, 59, 999);
+
+    // Get all students in the class
+    const studentsInClass = await Student.find({
+      batch,
+      year: normalizedYear,
+      semester: normalizedSemester,
+      department,
+      ...(section && { section }),
+      status: 'active'
+    })
+    .populate('userId', 'name email mobile')
+    .sort({ rollNumber: 1 });
+
+    if (studentsInClass.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No students found in your assigned class'
+      });
+    }
+
+    // Get all attendance records for this class
+    const studentUserIds = studentsInClass.map(s => s.userId._id);
+    const classId = `${batch}_${normalizedYear}_${normalizedSemester}${section ? `_${section}` : ''}`;
+    
+    // Build date filter if date is provided (for the report display)
+    let dateFilter = {};
+    if (normalizedDate) {
+      const targetDate = new Date(normalizedDate);
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+    }
+    
+    // Get records for the report (filtered by date if provided)
+    const allRecords = await Attendance.find({
+      studentId: { $in: studentUserIds },
+      classId,
+      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter })
+    })
+    .populate('studentId', 'name email mobile')
+    .populate('facultyId', 'name')
+    .sort({ date: -1 });
+
+    // Calculate total absent days for each student from attendance start date
+    // Using the same logic as student profile: exclude holidays and "Not Marked" days
+    let totalAbsentDaysMap = new Map();
+    if (attendanceStartDate) {
+      try {
+        // Get all attendance records from attendance start date to end date
+        const allAttendanceRecords = await Attendance.find({
+          studentId: { $in: studentUserIds },
+          classId,
+          date: { $gte: attendanceStartDate, $lte: calculationEndDate }
+        }).select('studentId date status').lean();
+        
+        // Get holidays for the department in the same date range
+        const Holiday = (await import('../models/Holiday.js')).default;
+        const holidayStartDate = attendanceStartDate.toISOString().split('T')[0];
+        const holidayEndDate = calculationEndDate.toISOString().split('T')[0];
+        
+        const holidays = await Holiday.find({
+          department,
+          holidayDate: { $gte: holidayStartDate, $lte: holidayEndDate },
+          isDeleted: false
+        }).select('holidayDate').lean();
+        
+        // Create a set of holiday dates for quick lookup
+        const holidayDates = new Set(holidays.map(h => 
+          typeof h.holidayDate === 'string' ? h.holidayDate : h.holidayDate.toISOString().split('T')[0]
+        ));
+        
+        // Filter to working days records (exclude holidays and "Not Marked" days)
+        const workingDaysRecords = allAttendanceRecords.filter(record => {
+          const recordDate = record.date instanceof Date 
+            ? record.date.toISOString().split('T')[0] 
+            : new Date(record.date).toISOString().split('T')[0];
+          return !holidayDates.has(recordDate) && record.status !== 'Not Marked';
+        });
+        
+        // Count absent days per student from working days records
+        workingDaysRecords.forEach(record => {
+          if (record.status === 'Absent') {
+            let studentIdStr = null;
+            if (record.studentId) {
+              if (typeof record.studentId === 'object' && record.studentId.toString) {
+                studentIdStr = record.studentId.toString();
+              } else if (typeof record.studentId === 'string') {
+                studentIdStr = record.studentId;
+              }
+            }
+            
+            if (studentIdStr) {
+              if (!totalAbsentDaysMap.has(studentIdStr)) {
+                totalAbsentDaysMap.set(studentIdStr, 0);
+              }
+              totalAbsentDaysMap.set(studentIdStr, totalAbsentDaysMap.get(studentIdStr) + 1);
+            }
+          }
+        });
+      } catch (calcError) {
+        console.error('Error calculating total absent days:', calcError);
+      }
+    }
+
+    // Filter records based on report type
+    let recordsToInclude = allRecords;
+    if (reportType === 'absentees') {
+      recordsToInclude = allRecords.filter(r => r.status === 'Absent');
+    }
+
+    // Calculate totals - only for this specific class
+    const totalStudents = studentsInClass.length;
+    const presentRecords = allRecords.filter(r => r.status === 'Present' || r.status === 'OD');
+    const uniquePresentStudents = new Set(presentRecords.map(r => r.studentId._id.toString()));
+    const totalPresent = uniquePresentStudents.size;
+    const absentRecords = allRecords.filter(r => r.status === 'Absent');
+    const uniqueAbsentStudents = new Set(absentRecords.map(r => r.studentId._id.toString()));
+    const totalAbsent = uniqueAbsentStudents.size;
+
+    // Get class display name
+    const classDisplayName = `${batch} | ${normalizedYear} | Semester ${semester}${section ? ` | Section ${section}` : ''}`;
+
+    if (format === 'excel') {
+      // Generate Excel report
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Attendance Report');
+
+      let currentRow = 1;
+      
+      // College header
+      worksheet.getRow(1).height = 30;
+      worksheet.getRow(2).height = 25;
+      worksheet.getRow(3).height = 25;
+
+      const collegeNameRow = worksheet.getRow(currentRow);
+      collegeNameRow.getCell(1).value = 'ER. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING';
+      collegeNameRow.getCell(1).font = { size: 14, bold: true };
+      collegeNameRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      worksheet.mergeCells(currentRow, 1, currentRow, 9);
+      currentRow++;
+
+      const autonomousRow = worksheet.getRow(currentRow);
+      autonomousRow.getCell(1).value = '(An Autonomous Institution)';
+      autonomousRow.getCell(1).font = { size: 11, bold: true };
+      autonomousRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      worksheet.mergeCells(currentRow, 1, currentRow, 9);
+      currentRow++;
+
+      const aicteRow = worksheet.getRow(currentRow);
+      aicteRow.getCell(1).value = 'Approved by AICTE - New Delhi, Affiliated to Anna University';
+      aicteRow.getCell(1).font = { size: 10 };
+      aicteRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      worksheet.mergeCells(currentRow, 1, currentRow, 9);
+      currentRow += 2;
+
+      // Report title
+      const titleRow = worksheet.getRow(currentRow);
+      let titleText = reportType === 'absentees' 
+        ? `Absentees Report | Class: ${classDisplayName} | Dept: ${currentUser.department || department} | Faculty: ${currentUser.name}`
+        : `Full Attendance Report | Class: ${classDisplayName} | Dept: ${currentUser.department || department} | Faculty: ${currentUser.name}`;
+      if (normalizedDate) {
+        const dateStr = new Date(normalizedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        titleText += ` | Date: ${dateStr}`;
+      }
+      titleRow.getCell(1).value = titleText;
+      titleRow.getCell(1).font = { size: 12, bold: true };
+      titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      worksheet.mergeCells(currentRow, 1, currentRow, 9);
+      currentRow += 2;
+
+      // Table headers
+      const headerRow = worksheet.getRow(currentRow);
+      const headers = ['Register Number', 'Student Name', 'Email', 'Mobile', 'Status', 'Date', 'No of Days Absent', 'Reason', 'Action Taken'];
+      headers.forEach((header, index) => {
+        const cell = headerRow.getCell(index + 1);
+        cell.value = header;
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF1F4E78' }
+        };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      });
+      headerRow.height = 25;
+      currentRow++;
+
+      // Data rows
+      if (recordsToInclude.length === 0) {
+        const noDataRow = worksheet.getRow(currentRow);
+        noDataRow.getCell(1).value = 'No records found';
+        noDataRow.getCell(1).font = { italic: true };
+        worksheet.mergeCells(currentRow, 1, currentRow, 9);
+        currentRow++;
+      } else {
+        recordsToInclude.forEach(record => {
+          const student = studentsInClass.find(s => s.userId._id.toString() === record.studentId._id.toString());
+          const dataRow = worksheet.getRow(currentRow);
+          
+          const studentIdStr = record.studentId._id ? record.studentId._id.toString() : record.studentId.toString();
+          const totalAbsentDays = totalAbsentDaysMap.get(studentIdStr) || 0;
+          
+          dataRow.getCell(1).value = student?.rollNumber || 'N/A';
+          dataRow.getCell(2).value = record.studentId.name;
+          dataRow.getCell(3).value = record.studentId.email || 'N/A';
+          dataRow.getCell(4).value = record.studentId.mobile || 'N/A';
+          dataRow.getCell(5).value = record.status;
+          dataRow.getCell(6).value = record.date.toISOString().split('T')[0];
+          dataRow.getCell(7).value = totalAbsentDays;
+          dataRow.getCell(8).value = record.reason || 'N/A';
+          dataRow.getCell(9).value = record.actionTaken || 'N/A';
+
+          for (let col = 1; col <= 9; col++) {
+            const cell = dataRow.getCell(col);
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            cell.alignment = { vertical: 'middle', wrapText: true };
+          }
+          dataRow.height = 20;
+          currentRow++;
+        });
+      }
+
+      currentRow += 1;
+
+      // Summary row
+      const summaryRow = worksheet.getRow(currentRow);
+      summaryRow.getCell(1).value = 'Summary';
+      summaryRow.getCell(1).font = { bold: true, size: 11 };
+      summaryRow.getCell(3).value = `Total Students: ${totalStudents}`;
+      summaryRow.getCell(3).font = { bold: true };
+      summaryRow.getCell(5).value = `Total Present: ${totalPresent}`;
+      summaryRow.getCell(5).font = { bold: true };
+      summaryRow.getCell(7).value = `Total Absent: ${totalAbsent}`;
+      summaryRow.getCell(7).font = { bold: true };
+
+      for (let col = 1; col <= 9; col++) {
+        const cell = summaryRow.getCell(col);
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE0E0E0' }
+        };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      }
+
+      // Set column widths
+      worksheet.getColumn(1).width = 18;
+      worksheet.getColumn(2).width = 25;
+      worksheet.getColumn(3).width = 30;
+      worksheet.getColumn(4).width = 15;
+      worksheet.getColumn(5).width = 12;
+      worksheet.getColumn(6).width = 12;
+      worksheet.getColumn(7).width = 18;
+      worksheet.getColumn(8).width = 30;
+      worksheet.getColumn(9).width = 30;
+
+      // Set response headers
+      const dateStr = normalizedDate ? normalizedDate : new Date().toISOString().split('T')[0];
+      const filename = `attendance-report-${reportType}-${batch}-${normalizedYear}-Sem${semester}${section ? `-${section}` : ''}-${dateStr}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+      console.log('📊 Generating Excel report, filename:', filename);
+      await workbook.xlsx.write(res);
+      console.log('✅ Excel report written successfully');
+      res.end();
+
+    } else if (format === 'pdf') {
+      // Generate PDF report
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      
+      const dateStr = normalizedDate ? normalizedDate : new Date().toISOString().split('T')[0];
+      const filename = `attendance-report-${reportType}-${batch}-${normalizedYear}-Sem${semester}${section ? `-${section}` : ''}-${dateStr}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      doc.pipe(res);
+
+      // College header
+      let yPosition = 50;
+      doc.fontSize(14).font('Helvetica-Bold').text('ER. PERUMAL MANIMEKALAI COLLEGE OF ENGINEERING', { align: 'center', y: yPosition });
+      yPosition += 20;
+      doc.fontSize(11).font('Helvetica-Bold').text('(An Autonomous Institution)', { align: 'center', y: yPosition });
+      yPosition += 15;
+      doc.fontSize(10).font('Helvetica').text('Approved by AICTE - New Delhi, Affiliated to Anna University', { align: 'center', y: yPosition });
+      yPosition += 30;
+
+      // Report title
+      let titleText = reportType === 'absentees' 
+        ? `Absentees Report | Class: ${classDisplayName} | Dept: ${currentUser.department || department} | Faculty: ${currentUser.name}`
+        : `Full Attendance Report | Class: ${classDisplayName} | Dept: ${currentUser.department || department} | Faculty: ${currentUser.name}`;
+      if (normalizedDate) {
+        const dateStr = new Date(normalizedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        titleText += ` | Date: ${dateStr}`;
+      }
+      doc.fontSize(12).font('Helvetica-Bold').text(titleText, { align: 'center', y: yPosition });
+      yPosition += 30;
+
+      // Table headers
+      const tableTop = yPosition;
+      const colWidths = [45, 70, 90, 60, 45, 55, 50, 80, 80];
+      const colPositions = [50, 95, 165, 255, 315, 360, 415, 465, 545];
+
+      doc.fontSize(8).font('Helvetica-Bold');
+      doc.text('Reg No', colPositions[0], tableTop, { width: colWidths[0] });
+      doc.text('Name', colPositions[1], tableTop, { width: colWidths[1] });
+      doc.text('Email', colPositions[2], tableTop, { width: colWidths[2] });
+      doc.text('Mobile', colPositions[3], tableTop, { width: colWidths[3] });
+      doc.text('Status', colPositions[4], tableTop, { width: colWidths[4] });
+      doc.text('Date', colPositions[5], tableTop, { width: colWidths[5] });
+      doc.text('Days Abs', colPositions[6], tableTop, { width: colWidths[6] });
+      doc.text('Reason', colPositions[7], tableTop, { width: colWidths[7] });
+      doc.text('Action', colPositions[8], tableTop, { width: colWidths[8] });
+
+      doc.moveTo(50, tableTop + 15).lineTo(545, tableTop + 15).stroke();
+      yPosition = tableTop + 25;
+
+      // Data rows
+      doc.font('Helvetica').fontSize(7);
+      if (recordsToInclude.length === 0) {
+        doc.text('No records found', { align: 'center', y: yPosition });
+        yPosition += 20;
+      } else {
+        recordsToInclude.forEach((record, index) => {
+          if (yPosition > 680) {
+            doc.addPage();
+            yPosition = 50;
+          }
+          const student = studentsInClass.find(s => s.userId._id.toString() === record.studentId._id.toString());
+          
+          const studentIdStr = record.studentId._id ? record.studentId._id.toString() : record.studentId.toString();
+          const totalAbsentDays = totalAbsentDaysMap.get(studentIdStr) || 0;
+          
+          let maxHeight = 15;
+          
+          doc.text(student?.rollNumber || 'N/A', colPositions[0], yPosition, { width: colWidths[0] });
+          doc.text(record.studentId.name || 'N/A', colPositions[1], yPosition, { width: colWidths[1] });
+          doc.text(record.studentId.email || 'N/A', colPositions[2], yPosition, { width: colWidths[2] });
+          doc.text(record.studentId.mobile || 'N/A', colPositions[3], yPosition, { width: colWidths[3] });
+          doc.text(record.status || 'N/A', colPositions[4], yPosition, { width: colWidths[4] });
+          doc.text(record.date.toISOString().split('T')[0], colPositions[5], yPosition, { width: colWidths[5] });
+          doc.text(totalAbsentDays.toString(), colPositions[6], yPosition, { width: colWidths[6] });
+          
+          const reasonText = record.reason || 'N/A';
+          const actionText = record.actionTaken || 'N/A';
+          
+          doc.text(reasonText, colPositions[7], yPosition, { width: colWidths[7] });
+          doc.text(actionText, colPositions[8], yPosition, { width: colWidths[8] });
+          
+          doc.moveTo(50, yPosition + maxHeight).lineTo(545, yPosition + maxHeight).stroke();
+          
+          yPosition += maxHeight + 5;
+        });
+      }
+
+      yPosition += 10;
+
+      // Summary
+      doc.font('Helvetica-Bold').fontSize(11);
+      doc.text(`Summary | Total Students: ${totalStudents} | Total Present: ${totalPresent} | Total Absent: ${totalAbsent}`, 50, yPosition);
+
+      console.log('📊 Generating PDF report, filename:', filename);
+      doc.end();
+      console.log('✅ PDF report generated successfully');
+    }
+
+  } catch (error) {
+    console.error('Error generating report:', error);
+    console.error('Error stack:', error.stack);
+    
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to generate report',
+        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    } else {
+      console.error('Cannot send error response - headers already sent');
+    }
   }
 });
 

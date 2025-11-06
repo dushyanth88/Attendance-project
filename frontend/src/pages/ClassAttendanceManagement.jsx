@@ -299,7 +299,7 @@ const ClassAttendanceManagement = () => {
   const tabs = [
     { id: 'mark', label: 'Mark Attendance', icon: '📝' },
     { id: 'history', label: 'Attendance History', icon: '📊' },
-    { id: 'report', label: 'Generate Report', icon: '📈' },
+    { id: 'report', label: 'Report Generation', icon: '📈' },
     { id: 'students', label: 'Student Management', icon: '👥' },
     { id: 'settings', label: 'Attendance Settings', icon: '⚙️' },
     { id: 'holidays', label: 'Holiday Management', icon: '🎉' }
@@ -429,13 +429,6 @@ const ClassAttendanceManagement = () => {
             onToast={showToast}
           />
         )}
-        {activeTab === 'report' && (
-          <AttendanceReportTab 
-            classData={classData} 
-            students={students} 
-            onToast={showToast}
-          />
-        )}
         {activeTab === 'students' && (
           <StudentManagementTab 
             classData={classData} 
@@ -457,6 +450,12 @@ const ClassAttendanceManagement = () => {
             setAttendanceEndDate={setAttendanceEndDate}
             updateAttendanceDates={updateAttendanceDates}
             updatingDates={updatingDates}
+            onToast={showToast}
+          />
+        )}
+        {activeTab === 'report' && (
+          <ReportGenerationTab 
+            classData={classData}
             onToast={showToast}
           />
         )}
@@ -1266,339 +1265,6 @@ const AttendanceHistoryTab = ({ classData, students, onToast }) => {
   );
 };
 
-// Attendance Report Tab Component
-const AttendanceReportTab = ({ classData, students, onToast }) => {
-  const [reportData, setReportData] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const generateAbsenteesReport = async () => {
-    try {
-      setLoading(true);
-      const todayISO = new Date().toISOString().split('T')[0];
-      
-      console.log('🔍 Generating absentees report with params:', {
-        batch: classData.batch,
-        year: classData.year,
-        semester: classData.semester,
-        section: classData.section,
-        startDate: todayISO,
-        endDate: todayISO
-      });
-      
-      const response = await apiFetch({
-        url: `/api/report/absentees?batch=${classData.batch}&year=${classData.year}&semester=${classData.semester}&section=${classData.section}&startDate=${todayISO}&endDate=${todayISO}`,
-        method: 'GET'
-      });
-
-      console.log('📊 API Response:', response.data);
-
-      if (response.data.success) {
-        setReportData(response.data.data);
-        onToast('Today\'s absentees report generated successfully!', 'success');
-      } else {
-        console.error('❌ API returned error:', response.data);
-        onToast(response.data.message || 'Failed to generate absentees report', 'error');
-      }
-    } catch (error) {
-      console.error('❌ Error generating absentees report:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data
-      });
-      
-      // Check for specific error types
-      if (error.response?.status === 401) {
-        onToast('Authentication failed. Please log in again.', 'error');
-      } else if (error.response?.status === 403) {
-        onToast('Access denied. You do not have permission to generate reports.', 'error');
-      } else if (error.response?.data?.message) {
-        onToast(`Error: ${error.response.data.message}`, 'error');
-      } else {
-        onToast('Error generating absentees report', 'error');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadExcelReport = () => {
-    if (!reportData) return;
-    
-    // Import XLSX dynamically
-    import('xlsx').then((XLSX) => {
-      const todayISO = new Date().toISOString().split('T')[0];
-      const worksheetData = [
-        ['S.No', 'Roll Number', 'Name', 'Total Days Absent', 'Reason', 'Action Taken', 'Attendance %'],
-        ...reportData.absentees.map(student => [
-          student.sNo,
-          student.rollNumber,
-          student.name,
-          student.totalDaysAbsent,
-          student.reason,
-          student.actionTaken,
-          `${student.attendancePercentage.toFixed(1)}%`
-        ])
-      ];
-
-      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Absentees Report');
-
-      // Generate Excel file
-      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `absentees-report-${classData.batch}-${todayISO}.xlsx`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      
-      onToast('Excel report downloaded successfully!', 'success');
-    }).catch(error => {
-      console.error('Error downloading Excel report:', error);
-      onToast('Error downloading Excel report', 'error');
-    });
-  };
-
-  const downloadPDFReport = () => {
-    if (!reportData) return;
-    
-    // Create a simple PDF using browser's print functionality
-    const printWindow = window.open('', '_blank');
-    const todayISO = new Date().toISOString().split('T')[0];
-    const reportContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Today's Absentees Report</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .class-info { margin-bottom: 20px; }
-          .summary { margin-bottom: 20px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          .no-data { text-align: center; color: #666; margin: 40px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>Today's Absentees Report</h1>
-          <h2>${reportData.classInfo.batch} | ${reportData.classInfo.year} | Semester ${reportData.classInfo.semester} | Section ${reportData.classInfo.section}</h2>
-          <p><strong>Date:</strong> ${new Date(todayISO).toLocaleDateString()}</p>
-        </div>
-        
-        <div class="class-info">
-          <p><strong>Department:</strong> ${reportData.classInfo.department}</p>
-        </div>
-        
-        <div class="summary">
-          <p><strong>Total Students:</strong> ${reportData.reportInfo.totalStudents}</p>
-          <p><strong>Total Absentees:</strong> ${reportData.reportInfo.totalAbsentees}</p>
-        </div>
-        
-        ${reportData.absentees.length > 0 ? `
-          <table>
-            <thead>
-              <tr>
-                <th>S.No</th>
-                <th>Roll Number</th>
-                <th>Name</th>
-                <th>Total Days Absent</th>
-                <th>Reason</th>
-                <th>Action Taken</th>
-                <th>Attendance %</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${reportData.absentees.map(student => `
-                <tr>
-                  <td>${student.sNo}</td>
-                  <td>${student.rollNumber}</td>
-                  <td>${student.name}</td>
-                  <td>${student.totalDaysAbsent}</td>
-                  <td>${student.reason}</td>
-                  <td>${student.actionTaken}</td>
-                  <td>${student.attendancePercentage.toFixed(1)}%</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        ` : `
-          <div class="no-data">
-            <h3>No Absentees Found</h3>
-            <p>All students have perfect attendance for today.</p>
-          </div>
-        `}
-      </body>
-      </html>
-    `;
-    
-    printWindow.document.write(reportContent);
-    printWindow.document.close();
-    printWindow.focus();
-    
-    // Wait for content to load then print
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 500);
-    
-    onToast('PDF report opened for printing!', 'success');
-  };
-
-  return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-medium text-gray-900">Generate Today's Absentees Report</h2>
-        <p className="text-sm text-gray-500">Create and download today's absentees report with roll number, name, total days absent, reason, and action taken</p>
-      </div>
-      <div className="p-6">
-        {/* Today's Date Display */}
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-blue-800">
-                Report Date
-              </h3>
-              <div className="mt-1 text-sm text-blue-700">
-                <p>{new Date().toLocaleDateString('en-GB', { 
-                  day: '2-digit', 
-                  month: '2-digit', 
-                  year: 'numeric' 
-                })} - Today's absentees will be included in the report</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end mb-6">
-          <button
-            onClick={generateAbsenteesReport}
-            disabled={loading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-          >
-            {loading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Generating...
-              </>
-            ) : (
-              <>
-                📈 Generate Today's Report
-              </>
-            )}
-          </button>
-        </div>
-
-        {reportData && (
-          <div className="space-y-6">
-            {/* Report Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-blue-900">Total Students</h3>
-                <p className="text-2xl font-bold text-blue-600">{reportData.reportInfo.totalStudents}</p>
-              </div>
-              <div className="bg-red-50 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-red-900">Today's Absentees</h3>
-                <p className="text-2xl font-bold text-red-600">{reportData.reportInfo.totalAbsentees}</p>
-              </div>
-            </div>
-
-            {/* Absentees Table */}
-            {reportData.absentees.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">S.No</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Roll Number</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Days Absent</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action Taken</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {reportData.absentees.map((student) => (
-                      <tr key={student.rollNumber} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {student.sNo}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {student.rollNumber}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {student.name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                            {student.totalDaysAbsent} days
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
-                          <div className="truncate" title={student.reason}>
-                            {student.reason}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
-                          <div className="truncate" title={student.actionTaken}>
-                            {student.actionTaken}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="text-gray-400 text-6xl mb-4">✅</div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Absentees Found</h3>
-                <p className="text-gray-500">All students have perfect attendance for today.</p>
-              </div>
-            )}
-
-            {/* Download Buttons */}
-            {reportData.absentees.length > 0 && (
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={downloadExcelReport}
-                  className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 flex items-center"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Download Excel
-                </button>
-                <button
-                  onClick={downloadPDFReport}
-                  className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 flex items-center"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
-                  Download PDF
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // Student Management Tab Component
 const StudentManagementTab = ({ classData, students, onToast, onStudentsUpdate, user, onStudentProfilePictureUpload, onRemoveStudentProfilePicture, navigate }) => {
   const [showAddStudent, setShowAddStudent] = useState(false);
@@ -1737,23 +1403,50 @@ if (response.data.success) {
         data: studentData
       });
 
-      if (response.data.success) {
+      console.log('Update student response:', response.data);
+
+      if (response.data && response.data.success) {
         onToast('Student updated successfully!', 'success');
         setEditingStudent(null);
         // Refresh students list
+        const sectionParam = classData.section ? `&section=${encodeURIComponent(classData.section)}` : '';
         const studentsResponse = await apiFetch({
-          url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${classData.semester}&department=${encodeURIComponent(classData.department)}`,
+          url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${encodeURIComponent(classData.semester)}&department=${encodeURIComponent(classData.department)}${sectionParam}`,
           method: 'GET'
         });
-        if (studentsResponse.data.success) {
+        if (studentsResponse.data && studentsResponse.data.success) {
           onStudentsUpdate(studentsResponse.data.data.students || []);
         }
       } else {
-        onToast(response.data.message || 'Failed to update student', 'error');
+        const errorMessage = response.data?.message || 'Failed to update student';
+        console.error('Update failed:', errorMessage);
+        onToast(errorMessage, 'error');
       }
     } catch (error) {
       console.error('Error updating student:', error);
-      onToast('Error updating student', 'error');
+      console.error('Error response:', error.response?.data);
+      
+      // Check if it's actually a success but axios is treating it as an error
+      if (error.response?.status === 200 && error.response?.data?.success) {
+        onToast('Student updated successfully!', 'success');
+        setEditingStudent(null);
+        // Refresh students list
+        try {
+          const sectionParam = classData.section ? `&section=${encodeURIComponent(classData.section)}` : '';
+          const studentsResponse = await apiFetch({
+            url: `/api/faculty/students?batch=${encodeURIComponent(classData.batch)}&year=${encodeURIComponent(classData.year)}&semester=${encodeURIComponent(classData.semester)}&department=${encodeURIComponent(classData.department)}${sectionParam}`,
+            method: 'GET'
+          });
+          if (studentsResponse.data && studentsResponse.data.success) {
+            onStudentsUpdate(studentsResponse.data.data.students || []);
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing students:', refreshError);
+        }
+      } else {
+        const errorMessage = error.response?.data?.message || error.message || 'Error updating student';
+        onToast(errorMessage, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -2455,6 +2148,255 @@ const AttendanceSettingsTab = ({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// Report Generation Tab Component
+const ReportGenerationTab = ({ classData, onToast }) => {
+  const [reportType, setReportType] = useState('absentees');
+  const [format, setFormat] = useState('excel');
+  const [dateOption, setDateOption] = useState('today'); // 'today' or 'specific'
+  const [specificDate, setSpecificDate] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Set today's date as default for specific date
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setSpecificDate(today);
+  }, []);
+
+  const handleGenerateReport = async () => {
+    try {
+      setLoading(true);
+
+      // Determine the date to use
+      let reportDate = null;
+      if (dateOption === 'today') {
+        reportDate = new Date().toISOString().split('T')[0];
+      } else if (dateOption === 'specific' && specificDate) {
+        reportDate = specificDate;
+      }
+
+      // Use direct fetch for blob downloads to ensure proper handling
+      const accessToken = localStorage.getItem('accessToken');
+      const response = await fetch('http://localhost:5000/api/attendance/generate-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          reportType,
+          format,
+          date: reportDate
+        })
+      });
+
+      console.log('Report generation response:', {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        contentType: response.headers.get('content-type')
+      });
+
+      if (!response.ok) {
+        // Try to parse error message
+        const errorText = await response.text();
+        let errorMessage = 'Failed to generate report';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.message || errorMessage;
+        } catch (e) {
+          errorMessage = errorText || errorMessage;
+        }
+        onToast(errorMessage, 'error');
+        return;
+      }
+
+      // Get the blob from response
+      const blob = await response.blob();
+      console.log('Blob received:', {
+        size: blob.size,
+        type: blob.type
+      });
+
+      if (blob.size === 0) {
+        onToast('Received empty file. Please try again.', 'error');
+        return;
+      }
+
+      // Get filename from Content-Disposition header or use default
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `attendance-report-${reportType}-${reportDate || new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+          // Decode URI if needed
+          try {
+            filename = decodeURIComponent(filename);
+          } catch (e) {
+            // Keep original if decode fails
+          }
+        }
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Cleanup
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }, 100);
+
+      onToast('Report generated and downloaded successfully!', 'success');
+    } catch (error) {
+      console.error('Error generating report:', error);
+      const errorMessage = error.message || 'Failed to generate report';
+      onToast(errorMessage, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <h2 className="text-lg font-medium text-gray-900">Report Generation</h2>
+        <p className="text-sm text-gray-500">Generate and download attendance reports for your assigned class</p>
+      </div>
+      <div className="p-6">
+        <div className="space-y-6">
+          {/* Report Type Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Report Type
+            </label>
+            <select
+              value={reportType}
+              onChange={(e) => setReportType(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="absentees">Absentees Report</option>
+              <option value="full">Full Attendance Report</option>
+            </select>
+            <p className="mt-1 text-sm text-gray-500">
+              {reportType === 'absentees'
+                ? 'Includes only students marked as Absent'
+                : 'Includes all students with their attendance details'}
+            </p>
+          </div>
+
+          {/* Export Format Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Export Format
+            </label>
+            <select
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <p className="mt-1 text-sm text-gray-500">
+              Choose the format for your report download
+            </p>
+          </div>
+
+          {/* Date Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Report Date
+            </label>
+            <div className="space-y-3">
+              <div className="flex items-center">
+                <input
+                  type="radio"
+                  id="today"
+                  name="dateOption"
+                  value="today"
+                  checked={dateOption === 'today'}
+                  onChange={(e) => setDateOption(e.target.value)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                />
+                <label htmlFor="today" className="ml-2 block text-sm text-gray-700">
+                  Today ({new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })})
+                </label>
+              </div>
+              <div className="flex items-center">
+                <input
+                  type="radio"
+                  id="specific"
+                  name="dateOption"
+                  value="specific"
+                  checked={dateOption === 'specific'}
+                  onChange={(e) => setDateOption(e.target.value)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                />
+                <label htmlFor="specific" className="ml-2 block text-sm text-gray-700 mr-3">
+                  Specific Date:
+                </label>
+                <input
+                  type="date"
+                  value={specificDate}
+                  onChange={(e) => setSpecificDate(e.target.value)}
+                  disabled={dateOption !== 'specific'}
+                  className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
+              </div>
+            </div>
+            <p className="mt-1 text-sm text-gray-500">
+              {dateOption === 'today'
+                ? 'Generate report for today\'s attendance'
+                : 'Select a specific date for the report'}
+            </p>
+          </div>
+
+          {/* Class Information Display */}
+          {classData && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="text-sm font-medium text-blue-900 mb-2">Class Information</h3>
+              <div className="text-sm text-blue-700">
+                <p><strong>Batch:</strong> {classData.batch}</p>
+                <p><strong>Year:</strong> {classData.year}</p>
+                <p><strong>Semester:</strong> {classData.semester}</p>
+                {classData.section && <p><strong>Section:</strong> {classData.section}</p>}
+                <p><strong>Department:</strong> {classData.department}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Generate Button */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleGenerateReport}
+              disabled={loading || !classData || (dateOption === 'specific' && !specificDate)}
+              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  📈 Generate Report
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

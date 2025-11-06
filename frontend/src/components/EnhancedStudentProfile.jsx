@@ -106,9 +106,10 @@ const EnhancedStudentProfile = () => {
     fetchAttendanceData(page);
   };
 
-  const AttendanceChart = ({ presentDays, absentDays, totalWorkingDays }) => {
-    const presentPercentage = totalWorkingDays > 0 ? (presentDays / totalWorkingDays) * 100 : 0;
-    const absentPercentage = totalWorkingDays > 0 ? (absentDays / totalWorkingDays) * 100 : 0;
+  const AttendanceChart = ({ presentDays, absentDays }) => {
+    const totalDays = (presentDays || 0) + (absentDays || 0);
+    const presentPercentage = totalDays > 0 ? ((presentDays || 0) / totalDays) * 100 : 0;
+    const absentPercentage = totalDays > 0 ? ((absentDays || 0) / totalDays) * 100 : 0;
 
     return (
       <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-100">
@@ -354,7 +355,7 @@ const EnhancedStudentProfile = () => {
               ) : attendance ? (
                 <div className="space-y-6">
                   {/* Statistics Cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-green-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-green-600">
                         ✅ {attendance.presentDays || 0}
@@ -373,12 +374,6 @@ const EnhancedStudentProfile = () => {
                       </div>
                       <div className="text-sm text-red-700">Days Absent</div>
                     </div>
-                    <div className="bg-purple-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-purple-600">
-                        📅 {attendance.totalWorkingDays || 0}
-                      </div>
-                      <div className="text-sm text-purple-700">Total Days</div>
-                    </div>
                     <div className="bg-indigo-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-indigo-600">
                         📊 {attendance.attendancePercentage || 0}%
@@ -391,7 +386,6 @@ const EnhancedStudentProfile = () => {
                   <AttendanceChart 
                     presentDays={attendance.presentDays} 
                     absentDays={attendance.absentDays} 
-                    totalWorkingDays={attendance.totalWorkingDays}
                   />
                 </div>
               ) : (
