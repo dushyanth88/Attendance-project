@@ -246,7 +246,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Author
 
-**Karthik** - [GitHub Profile](https://github.com/Karthik0484)
+**Dushyanth** - [GitHub Profile](https://github.com/dushyanth88)
 
 ## 🙏 Acknowledgments
 
