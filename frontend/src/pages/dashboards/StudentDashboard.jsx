@@ -212,6 +212,12 @@ const StudentDashboard = () => {
           setAttendanceEndDate(endDate);
           setRollNumber(data.roll_number || null);
           
+          // Use holidays from API response if available (includes all holidays in the date range)
+          if (data.holidays && Array.isArray(data.holidays)) {
+            setHolidays(data.holidays);
+            console.log('🎉 Holidays from attendance API:', data.holidays);
+          }
+          
           // Calculate actual attendance statistics
           // OD students are counted as Present for calculations
           const presentCountWithOD = data.attendance.filter(record => record.status === 'Present' || record.status === 'OD').length;
@@ -252,29 +258,33 @@ const StudentDashboard = () => {
     fetchAttendance();
   }, [user]);
 
-  // Fetch holidays
+  // Fetch holidays as fallback (if not included in attendance API response)
+  // The attendance API now includes holidays, but we keep this as a fallback
   useEffect(() => {
     const fetchHolidays = async () => {
-      try {
-        const res = await fetch('/api/holidays/student', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
-        });
-        
-        const data = await res.json();
-        
-        if (res.ok && data.status === 'success') {
-          setHolidays(data.data || []);
-          console.log('🎉 Holidays fetched:', data.data);
+      // Only fetch if we don't already have holidays (they should come from attendance API)
+      if (holidays.length === 0) {
+        try {
+          const res = await fetch('/api/holidays/student', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+          });
+          
+          const data = await res.json();
+          
+          if (res.ok && data.status === 'success') {
+            setHolidays(data.data || []);
+            console.log('🎉 Holidays fetched (fallback):', data.data);
+          }
+        } catch (e) {
+          console.error('❌ Error fetching holidays:', e);
         }
-      } catch (e) {
-        console.error('❌ Error fetching holidays:', e);
       }
     };
     
     if (user?.role === 'student') {
       fetchHolidays();
     }
-  }, [user]);
+  }, [user, holidays.length]);
 
   // Calculate total working days from attendance start date to today
   useEffect(() => {
@@ -445,31 +455,6 @@ const StudentDashboard = () => {
               )}
               <p className="text-sm text-blue-600">Department: {user?.department}</p>
               <p className="text-sm text-gray-500">Class: {user?.class || 'Not assigned'}</p>
-              {attendanceStartDate ? (
-                <div className="mt-2 p-2 bg-green-50 rounded-lg border border-green-200">
-                  <p className="text-sm text-green-700 font-semibold">
-                    📅 Attendance Period Started: {(() => {
-                      try {
-                        return new Date(attendanceStartDate).toLocaleDateString('en-US', { 
-                          weekday: 'short', 
-                          year: 'numeric', 
-                          month: 'short', 
-                          day: 'numeric' 
-                        });
-                      } catch (e) {
-                        console.error('Error formatting date:', e, attendanceStartDate);
-                        return attendanceStartDate;
-                      }
-                    })()}
-                  </p>
-                </div>
-              ) : (
-                <div className="mt-2 p-2 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <p className="text-sm text-yellow-700 font-medium">
-                    ⚠️ Attendance start date not set by class advisor
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </div>

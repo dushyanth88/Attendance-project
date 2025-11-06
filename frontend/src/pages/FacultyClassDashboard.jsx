@@ -5,7 +5,6 @@ import { useClass } from '../context/ClassContext';
 import AttendanceManager from './AttendanceManager';
 import AttendanceHistory from './AttendanceHistory';
 import StudentManagement from './StudentManagement';
-import ReportGenerator from './ReportGenerator';
 import Toast from '../components/Toast';
 import TeamFooter from '../components/TeamFooter';
 
@@ -49,8 +48,7 @@ const FacultyClassDashboard = () => {
   const tabs = [
     { id: 'attendance', label: 'Attendance', icon: '📊', component: AttendanceManager },
     { id: 'history', label: 'History', icon: '📋', component: AttendanceHistory },
-    { id: 'students', label: 'Students', icon: '👥', component: StudentManagement },
-    { id: 'reports', label: 'Reports', icon: '📈', component: ReportGenerator }
+    { id: 'students', label: 'Students', icon: '👥', component: StudentManagement }
   ];
 
   if (!activeClass) {

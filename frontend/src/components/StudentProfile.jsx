@@ -79,54 +79,81 @@ const StudentProfile = () => {
     }
   }, [loading, studentData]);
 
-  // Fetch holidays
+  // Fetch holidays from attendance API (same as StudentDashboard)
+  // This ensures we get the exact same holidays as StudentDashboard
   useEffect(() => {
-    const fetchHolidays = async () => {
-      try {
-        const response = await apiFetch({
-          url: '/api/holidays/student',
-          method: 'GET'
-        });
-        
-        if (response.data?.status === 'success') {
-          setHolidays(response.data.data || []);
-          console.log('🎉 Holidays fetched:', response.data.data);
+    const fetchAttendanceData = async () => {
+      if (studentId && attendanceStartDate) {
+        try {
+          // Fetch from attendance API to get holidays (same as StudentDashboard)
+          const res = await fetch(`/api/attendance/student/${studentId}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+          });
+          
+          const data = await res.json();
+          
+          // Use holidays from API response if available (same as StudentDashboard)
+          if (res.ok && data && data.holidays && Array.isArray(data.holidays)) {
+            setHolidays(data.holidays);
+            console.log('🎉 [StudentProfile] Holidays from attendance API:', data.holidays);
+          } else {
+            console.log('⚠️ [StudentProfile] No holidays in attendance API response');
+          }
+        } catch (e) {
+          console.error('❌ [StudentProfile] Error fetching holidays from attendance API:', e);
         }
-      } catch (error) {
-        console.error('❌ Error fetching holidays:', error);
       }
     };
     
-    if (studentData?.department) {
+    fetchAttendanceData();
+  }, [studentId, attendanceStartDate]);
+  
+  // Fetch holidays as fallback (if not included in attendance API response)
+  // Same fallback logic as StudentDashboard
+  useEffect(() => {
+    const fetchHolidays = async () => {
+      // Only fetch if we don't already have holidays (they should come from attendance API)
+      if (holidays.length === 0 && studentId) {
+        try {
+          const res = await fetch('/api/holidays/student', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+          });
+          
+          const data = await res.json();
+          
+          if (res.ok && data.status === 'success') {
+            setHolidays(data.data || []);
+            console.log('🎉 [StudentProfile] Holidays fetched (fallback):', data.data);
+          }
+        } catch (e) {
+          console.error('❌ [StudentProfile] Error fetching holidays:', e);
+        }
+      }
+    };
+    
+    if (studentId) {
       fetchHolidays();
     }
-  }, [studentData?.department]);
+  }, [studentId, holidays.length]);
 
   // Calculate total working days from attendance start date to today
+  // Exact same logic as StudentDashboard
   useEffect(() => {
-    console.log('🔄 Recalculating working days:', {
-      hasStartDate: !!attendanceStartDate,
-      startDate: attendanceStartDate,
-      endDate: attendanceEndDate,
-      holidaysCount: holidays.length,
-      backendTotalDays: attendanceStats?.totalDays
-    });
-    
     if (attendanceStartDate) {
       const workingDays = calculateWorkingDays(attendanceStartDate, attendanceEndDate, holidays);
       setCalculatedWorkingDays(workingDays);
-      console.log('📊 Calculated working days for profile:', {
+      console.log('📊 [StudentProfile] Calculated working days:', {
         startDate: attendanceStartDate,
         endDate: attendanceEndDate,
         holidaysCount: holidays.length,
-        calculatedWorkingDays: workingDays,
-        backendTotalDays: attendanceStats?.totalDays
+        holidays: holidays,
+        workingDays
       });
     } else {
-      // Fallback to backend totalDays if no start date
+      // If no start date, use the count from attendanceStats as fallback
       const fallbackDays = attendanceStats?.totalDays || 0;
       setCalculatedWorkingDays(fallbackDays);
-      console.log('⚠️ No start date, using backend totalDays:', fallbackDays);
+      console.log('⚠️ [StudentProfile] No start date, using backend totalDays:', fallbackDays);
     }
   }, [attendanceStartDate, attendanceEndDate, holidays, attendanceStats?.totalDays]);
 
@@ -144,6 +171,9 @@ const StudentProfile = () => {
         setAttendanceStats(responseData.data.attendanceStats);
         setMonthlyAttendance(responseData.data.monthlyAttendance);
         setRecentAttendance(responseData.data.recentAttendance);
+        
+        // Clear holidays initially - will be fetched from attendance API
+        setHolidays([]);
         
         // Extract attendance dates from attendanceStats
         console.log('📅 Attendance stats from API:', responseData.data.attendanceStats);
@@ -215,6 +245,12 @@ const StudentProfile = () => {
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
 
+    // Filter out records before attendance start date
+    const startDate = attendanceStartDate ? new Date(attendanceStartDate) : null;
+    if (startDate) {
+      startDate.setHours(0, 0, 0, 0);
+    }
+
     const days = [];
     
     // Add empty cells for days before the first day of the month
@@ -225,7 +261,15 @@ const StudentProfile = () => {
     // Add days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const attendance = monthData.find(record => record.date === dateStr);
+      const dayDate = new Date(dateStr);
+      dayDate.setHours(0, 0, 0, 0);
+      
+      // Only show attendance if date is on or after start date
+      let attendance = null;
+      if (!startDate || dayDate >= startDate) {
+        attendance = monthData.find(record => record.date === dateStr);
+      }
+      
       days.push({ day, date: dateStr, attendance });
     }
 
@@ -434,16 +478,6 @@ const StudentProfile = () => {
                     <span className="text-2xl font-bold text-amber-600">{attendanceStats.holidayCount || 0}</span>
                   </div>
                   
-                  <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className="text-2xl mr-3">📅</span>
-                      <span className="font-medium text-blue-800">Total Working Days</span>
-                    </div>
-                    <span className="text-2xl font-bold text-blue-600">
-                      {attendanceStartDate ? calculatedWorkingDays : (attendanceStats?.totalDays || 0)}
-                    </span>
-                  </div>
-                  
                   <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg">
                     <div className="flex items-center">
                       <span className="text-2xl mr-3">📊</span>
@@ -518,9 +552,24 @@ const StudentProfile = () => {
                 </div>
                 <h3 className="text-lg font-bold text-gray-800">Recent Attendance (Last 30 Days)</h3>
               </div>
-              {recentAttendance.length > 0 ? (
-                <div className="space-y-2">
-                  {recentAttendance.slice(0, 10).map((record, index) => (
+              {(() => {
+                // Filter recentAttendance to exclude dates before attendance start date
+                const startDate = attendanceStartDate ? new Date(attendanceStartDate) : null;
+                if (startDate) {
+                  startDate.setHours(0, 0, 0, 0);
+                }
+                
+                const filteredRecentAttendance = startDate 
+                  ? recentAttendance.filter(record => {
+                      const recordDate = new Date(record.date);
+                      recordDate.setHours(0, 0, 0, 0);
+                      return recordDate >= startDate;
+                    })
+                  : recentAttendance;
+                
+                return filteredRecentAttendance.length > 0 ? (
+                  <div className="space-y-2">
+                    {filteredRecentAttendance.slice(0, 10).map((record, index) => (
                     <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center">
                         <span className="text-lg mr-3">{getAttendanceIcon(record.status)}</span>
@@ -548,7 +597,8 @@ const StudentProfile = () => {
                 <div className="text-center py-8 text-gray-500">
                   No recent attendance records found
                 </div>
-              )}
+              );
+              })()}
             </div>
           </div>
         </div>

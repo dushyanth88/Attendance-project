@@ -18,7 +18,6 @@ import AssignedBatchesPage from './pages/AssignedBatchesPage';
 import StudentManagementPage from './pages/StudentManagementPage';
 import EnhancedStudentProfile from './components/EnhancedStudentProfile';
 import StudentProfile from './components/StudentProfile';
-import ReportGeneration from './components/ReportGeneration';
 import TeamFooter from './components/TeamFooter';
 import './App.css';
 
@@ -160,15 +159,6 @@ const AppRoutes = () => {
                 </ProtectedRoute>
               } 
             />
-            <Route 
-              path="/report-generation" 
-              element={
-                <ProtectedRoute allowedRoles={['faculty', 'hod', 'principal', 'admin']}>
-                  <ReportGeneration />
-                </ProtectedRoute>
-              } 
-            />
-            
             {/* Default routes redirect to login */}
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
