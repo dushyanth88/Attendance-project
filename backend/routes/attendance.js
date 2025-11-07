@@ -793,18 +793,42 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       };
       
       // If we have attendance dates, filter holidays to that range
+      // Always include holidays from start date to today (or end date if specified)
       if (attendanceStartDate || attendanceEndDate) {
         holidayFilter.holidayDate = {};
         if (attendanceStartDate) {
-          holidayFilter.holidayDate.$gte = attendanceStartDate;
+          // Convert to string format for comparison
+          const startDateStr = typeof attendanceStartDate === 'string' 
+            ? attendanceStartDate.split('T')[0] 
+            : (attendanceStartDate instanceof Date 
+              ? attendanceStartDate.toISOString().split('T')[0] 
+              : String(attendanceStartDate).split('T')[0]);
+          holidayFilter.holidayDate.$gte = startDateStr;
         }
-        const endDate = attendanceEndDate || new Date().toISOString().split('T')[0];
-        holidayFilter.holidayDate.$lte = endDate;
+        // Use endDate or today, whichever is earlier (to include today if it's a holiday)
+        const todayStr = getCurrentISTDate();
+        const endDate = attendanceEndDate 
+          ? (typeof attendanceEndDate === 'string' 
+            ? attendanceEndDate.split('T')[0] 
+            : (attendanceEndDate instanceof Date 
+              ? attendanceEndDate.toISOString().split('T')[0] 
+              : String(attendanceEndDate).split('T')[0]))
+          : todayStr;
+        // Always include up to today (or endDate if it's in the past)
+        holidayFilter.holidayDate.$lte = endDate > todayStr ? todayStr : endDate;
       } else {
-        // If no date range, get all holidays (or limit to current academic year)
-        const today = new Date().toISOString().split('T')[0];
-        holidayFilter.holidayDate = { $gte: today }; // At least future holidays
+        // If no date range, get holidays from start of academic year to today
+        // This ensures today's holiday is included
+        const todayStr = getCurrentISTDate();
+        const currentYear = new Date().getFullYear();
+        const academicYearStart = `${currentYear}-08-01`; // August 1st
+        holidayFilter.holidayDate = { 
+          $gte: academicYearStart,
+          $lte: todayStr
+        };
       }
+      
+      console.log('🔍 [Attendance API] Holiday filter:', JSON.stringify(holidayFilter, null, 2));
       
       const holidayDocs = await Holiday.find(holidayFilter)
         .select('holidayDate reason')

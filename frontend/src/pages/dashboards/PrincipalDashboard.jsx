@@ -25,6 +25,9 @@ const PrincipalDashboard = () => {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [overallStats, setOverallStats] = useState({loading: true});
   const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
+  const [holidays, setHolidays] = useState([]);
+  const [holidaysLoading, setHolidaysLoading] = useState(true);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
     setProfileImage(user?.profileImage);
@@ -85,6 +88,56 @@ const PrincipalDashboard = () => {
       .catch(() => setOverallStats({loading:false, error:'Failed to fetch stats'}));
     return () => { mounted = false; }
   }, []);
+
+  // Fetch holidays for principal (all departments)
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchHolidays = async () => {
+      try {
+        setHolidaysLoading(true);
+        const response = await apiFetch({ 
+          url: `/api/holidays?year=${selectedYear}` 
+        });
+        
+        if (!isMounted) return;
+        
+        if (response?.data?.status === 'success') {
+          // Ensure we have valid holiday data
+          const holidaysData = Array.isArray(response.data.data) ? response.data.data : [];
+          setHolidays(holidaysData);
+        } else {
+          setHolidays([]);
+        }
+      } catch (error) {
+        if (!isMounted) return;
+        console.error('Error fetching holidays:', error);
+        setHolidays([]);
+        // Optionally show toast error
+        setToast({
+          show: true,
+          message: 'Failed to load holidays. Please try again.',
+          type: 'error'
+        });
+        // Auto-hide toast after 3 seconds
+        setTimeout(() => {
+          setToast(prev => ({ ...prev, show: false }));
+        }, 3000);
+      } finally {
+        if (isMounted) {
+          setHolidaysLoading(false);
+        }
+      }
+    };
+
+    if (selectedYear) {
+      fetchHolidays();
+    }
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedYear]);
 
   const refresh = async () => {
     const [countRes, listRes, deptRes, facultyDeptRes, facultiesByDeptRes] = await Promise.all([
@@ -429,6 +482,137 @@ const PrincipalDashboard = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Holidays Section */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Holidays</h3>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600">Year:</label>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(year => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          {holidaysLoading ? (
+            <div className="text-center py-8">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+              <p className="text-gray-500 mt-2">Loading holidays...</p>
+            </div>
+          ) : holidays.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-8">No holidays found for {selectedYear}.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Declared By</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {holidays.map((holiday) => {
+                    if (!holiday || !holiday.date) return null;
+                    
+                    try {
+                      // Parse holiday date - handle both string and Date formats
+                      const holidayDateStr = typeof holiday.date === 'string' 
+                        ? holiday.date.split('T')[0] 
+                        : holiday.date;
+                      
+                      // Create date from YYYY-MM-DD string to avoid timezone issues
+                      const [year, month, day] = holidayDateStr.split('-').map(Number);
+                      const holidayDate = new Date(year, month - 1, day);
+                      
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const dateToCompare = new Date(holidayDate);
+                      dateToCompare.setHours(0, 0, 0, 0);
+                      const isPast = dateToCompare < today;
+                      const isToday = dateToCompare.getTime() === today.getTime();
+                      
+                      // Format date safely
+                      let formattedDate = '';
+                      try {
+                        formattedDate = holidayDate.toLocaleDateString('en-US', { 
+                          weekday: 'short', 
+                          year: 'numeric', 
+                          month: 'short', 
+                          day: 'numeric' 
+                        });
+                      } catch (e) {
+                        formattedDate = holidayDateStr;
+                      }
+                      
+                      // Format created date safely
+                      let formattedCreatedDate = '';
+                      try {
+                        if (holiday.createdAt) {
+                          const createdDate = new Date(holiday.createdAt);
+                          formattedCreatedDate = createdDate.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          });
+                        }
+                      } catch (e) {
+                        formattedCreatedDate = '';
+                      }
+                      
+                      return (
+                        <tr 
+                          key={holiday.id || holiday._id || Math.random()} 
+                          className={`hover:bg-gray-50 ${isPast ? 'opacity-60' : ''} ${isToday ? 'bg-yellow-50 border-l-4 border-yellow-400' : ''}`}
+                        >
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {formattedDate}
+                            </div>
+                            {isToday && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
+                                Today
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                              {holiday.department || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-sm text-gray-900">{holiday.reason || 'No reason provided'}</div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm text-gray-900 font-medium">{holiday.createdBy || 'Unknown'}</div>
+                            {holiday.createdByEmail && (
+                              <div className="text-xs text-gray-500">{holiday.createdByEmail}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                            {formattedCreatedDate || 'N/A'}
+                          </td>
+                        </tr>
+                      );
+                    } catch (error) {
+                      console.error('Error rendering holiday:', error, holiday);
+                      return null;
+                    }
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Manage HODs */}

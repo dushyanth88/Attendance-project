@@ -28,15 +28,35 @@ const StudentDashboard = () => {
   const [showImagePreview, setShowImagePreview] = useState(false);
 
   // Calculate working days from attendance start date to today
+  // Excludes weekends (Saturday, Sunday) and holidays
   const calculateWorkingDays = (startDate, endDate = null, holidaysList = []) => {
     if (!startDate) return 0;
 
     try {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      // Parse start date - handle string format YYYY-MM-DD to avoid timezone issues
+      let start;
+      if (typeof startDate === 'string') {
+        const [year, month, day] = startDate.split('T')[0].split('-').map(Number);
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      } else {
+        start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+      }
       
-      const end = endDate ? new Date(endDate) : new Date();
-      end.setHours(23, 59, 59, 999);
+      // Parse end date
+      let end;
+      if (endDate) {
+        if (typeof endDate === 'string') {
+          const [year, month, day] = endDate.split('T')[0].split('-').map(Number);
+          end = new Date(year, month - 1, day, 23, 59, 59, 999);
+        } else {
+          end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+        }
+      } else {
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
+      }
       
       // Don't count future dates
       const today = new Date();
@@ -46,28 +66,88 @@ const StudentDashboard = () => {
       if (start > actualEnd) return 0;
 
       // Create a set of holiday dates for quick lookup
+      // Handle both string and Date formats, ensuring consistent YYYY-MM-DD format
       const holidayDates = new Set(
         holidaysList.map(holiday => {
-          const holidayDate = new Date(holiday.date);
-          return holidayDate.toISOString().split('T')[0];
-        })
+          const holidayDateValue = holiday.date || holiday.holidayDate || holiday;
+          
+          // If it's already a string in YYYY-MM-DD format, use it directly
+          if (typeof holidayDateValue === 'string') {
+            // Extract just the date part (YYYY-MM-DD) if it includes time
+            return holidayDateValue.split('T')[0];
+          }
+          
+          // If it's a Date object, format it properly to avoid timezone issues
+          if (holidayDateValue instanceof Date) {
+            // Use local date components to avoid timezone conversion
+            const year = holidayDateValue.getFullYear();
+            const month = String(holidayDateValue.getMonth() + 1).padStart(2, '0');
+            const day = String(holidayDateValue.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+          
+          // Fallback: try to convert to string and extract date
+          return String(holidayDateValue).split('T')[0];
+        }).filter(date => date && date.length === 10) // Only valid YYYY-MM-DD dates
       );
 
+      console.log('📅 [StudentDashboard] WorkingDays Calc - Holiday dates set:', Array.from(holidayDates));
+      console.log('📅 [StudentDashboard] WorkingDays Calc - Holidays list:', holidaysList);
+      console.log('📅 [StudentDashboard] WorkingDays Calc - Start date:', startDate, 'End date:', endDate);
+
       let workingDays = 0;
+      let skippedSundays = 0;
+      let skippedSaturdays = 0;
+      let skippedHolidays = 0;
       const currentDate = new Date(start);
       
       while (currentDate <= actualEnd) {
         const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
-        const dateString = currentDate.toISOString().split('T')[0];
         
-        // Count only weekdays (Monday to Friday) and exclude holidays
-        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayDates.has(dateString)) {
-          workingDays++;
+        // Format date as YYYY-MM-DD using local date components to avoid timezone issues
+        const year = currentDate.getFullYear();
+        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        const dateString = `${year}-${month}-${day}`;
+        
+        // Skip Sundays (0)
+        if (dayOfWeek === 0) {
+          skippedSundays++;
+          console.log('⏭️ [StudentDashboard] Skipping Sunday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
         }
+        
+        // Skip Saturdays (6)
+        if (dayOfWeek === 6) {
+          skippedSaturdays++;
+          console.log('⏭️ [StudentDashboard] Skipping Saturday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+        
+        // Skip holidays - check if this date is in the holiday set
+        if (holidayDates.has(dateString)) {
+          skippedHolidays++;
+          console.log('🎉 [StudentDashboard] Skipping holiday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+        
+        // Count only weekdays (Monday to Friday) that are not holidays
+        workingDays++;
         
         // Move to next day
         currentDate.setDate(currentDate.getDate() + 1);
       }
+      
+      console.log('📊 [StudentDashboard] WorkingDays Calc Summary:', {
+        workingDays,
+        skippedSundays,
+        skippedSaturdays,
+        skippedHolidays,
+        totalDaysChecked: workingDays + skippedSundays + skippedSaturdays + skippedHolidays
+      });
       
       return workingDays;
     } catch (error) {
@@ -214,8 +294,15 @@ const StudentDashboard = () => {
           
           // Use holidays from API response if available (includes all holidays in the date range)
           if (data.holidays && Array.isArray(data.holidays)) {
-            setHolidays(data.holidays);
-            console.log('🎉 Holidays from attendance API:', data.holidays);
+            // Ensure holidays are in the correct format with date field
+            const formattedHolidays = data.holidays.map(holiday => ({
+              date: holiday.date || holiday.holidayDate || holiday,
+              reason: holiday.reason || 'Holiday'
+            }));
+            setHolidays(formattedHolidays);
+            console.log('🎉 [StudentDashboard] Holidays from attendance API:', formattedHolidays);
+            console.log('🎉 [StudentDashboard] Holidays count:', formattedHolidays.length);
+            console.log('🎉 [StudentDashboard] Holiday dates:', formattedHolidays.map(h => h.date));
           }
           
           // Calculate actual attendance statistics

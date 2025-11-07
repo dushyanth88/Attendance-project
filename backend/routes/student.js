@@ -6,6 +6,14 @@ import User from '../models/User.js';
 import Attendance from '../models/Attendance.js';
 import { authenticate, facultyAndAbove } from '../middleware/auth.js';
 import { resolveFacultyId, validateFacultyClassBinding, createAuditLog } from '../services/facultyResolutionService.js';
+import { toISTDateString, getCurrentISTDate } from '../utils/istTimezone.js';
+import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone.js';
+import utc from 'dayjs/plugin/utc.js';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+const IST_TIMEZONE = 'Asia/Kolkata';
 
 const router = express.Router();
 
@@ -1463,23 +1471,102 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     });
     
     // Get the most recently updated assignment (in case there are multiple)
-    // Use find().sort().limit(1) to get the most recent one
+    // CRITICAL: Filter by FACULTY department, not just departmentId (HOD)
+    // The departmentId might be incorrect if assignments were created by wrong HOD
+    // The most reliable filter is the faculty's department field
     let classAssignment = null;
-    const assignments = await ClassAssignment.find({
+    const User = (await import('../models/User.js')).default;
+    
+    console.log('🔍 Finding ClassAssignments for:', {
+      batch: student.batch,
+      year: normalizedYear,
+      semester: semesterNumber,
+      section: student.section,
+      studentDepartment: student.department
+    });
+    
+    // Step 1: Get ALL ClassAssignments matching batch/year/semester/section
+    // We need to check all of them and filter by faculty department
+    // Note: facultyId in ClassAssignment references User model, so we get department directly
+    let allAssignments = await ClassAssignment.find({
       batch: student.batch,
       year: normalizedYear,
       semester: semesterNumber,
       section: student.section,
       active: true
     })
-    .sort({ updatedAt: -1 })
-    .limit(1);
+    .populate('facultyId', 'name email department position') // facultyId references User, so department is here
+    .populate('departmentId', 'name department')
+    .sort({ updatedAt: -1 });
     
-    if (assignments.length > 0) {
-      classAssignment = assignments[0];
+    console.log(`📋 Found ${allAssignments.length} total ClassAssignments for class`);
+    
+    // Log all assignments for debugging
+    allAssignments.forEach(assignment => {
+      console.log('📝 Assignment found:', {
+        id: assignment._id,
+        facultyName: assignment.facultyId?.name,
+        facultyDepartment: assignment.facultyId?.department,
+        studentDepartment: student.department
+      });
+    });
+    
+    // Step 2: Filter by faculty department - CRITICAL: This must match exactly
+    // facultyId references User model, so assignment.facultyId.department is the User's department
+    const matchingAssignments = allAssignments.filter(assignment => {
+      if (!assignment.facultyId) {
+        console.log('⚠️ Assignment has no facultyId:', assignment._id);
+        return false;
+      }
+      
+      // Get department from populated facultyId (which is a User)
+      const facultyDepartment = assignment.facultyId.department?.trim();
+      const studentDept = student.department?.trim();
+      
+      // Strict comparison - must match exactly
+      const matches = facultyDepartment === studentDept;
+      
+      if (!matches) {
+        console.log('❌ Assignment REJECTED - department mismatch:', {
+          assignmentId: assignment._id,
+          facultyName: assignment.facultyId?.name,
+          facultyDepartment: facultyDepartment,
+          studentDepartment: studentDept,
+          match: false
+        });
+      } else {
+        console.log('✅ Assignment ACCEPTED - department matches:', {
+          assignmentId: assignment._id,
+          facultyName: assignment.facultyId?.name,
+          facultyDepartment: facultyDepartment,
+          studentDepartment: studentDept
+        });
+      }
+      
+      return matches;
+    });
+    
+    // Step 4: Use the most recent matching assignment
+    if (matchingAssignments.length > 0) {
+      classAssignment = matchingAssignments[0];
+      console.log('✅ Selected ClassAssignment for student:', {
+        assignmentId: classAssignment._id,
+        studentDepartment: student.department,
+        facultyName: classAssignment.facultyId?.name || 'Unknown',
+        facultyDepartment: classAssignment.facultyId?.department || 'Unknown'
+      });
+    } else {
+      console.log('❌ No ClassAssignment found with matching faculty department:', {
+        studentDepartment: student.department,
+        totalAssignmentsChecked: allAssignments.length,
+        facultyDepartments: allAssignments.map(a => ({
+          name: a.facultyId?.name,
+          dept: a.facultyId?.department || 'N/A'
+        }))
+      });
     }
     
-    // If not found with normalized year, try original format
+    // If not found with normalized year, try original format with faculty department filter
     if (!classAssignment && student.year !== normalizedYear) {
       console.log('📅 Trying with original year format...');
       const assignmentsAlt = await ClassAssignment.find({
@@ -1489,11 +1576,36 @@ router.get('/:id/profile', authenticate, async (req, res) => {
         section: student.section,
         active: true
       })
-      .sort({ updatedAt: -1 })
-      .limit(1);
+      .populate('facultyId', 'name email department position') // facultyId references User
+      .populate('departmentId', 'name department')
+      .sort({ updatedAt: -1 });
       
-      if (assignmentsAlt.length > 0) {
-        classAssignment = assignmentsAlt[0];
+      // Filter by faculty department - strict match required
+      const matchingAlt = assignmentsAlt.filter(assignment => {
+        if (!assignment.facultyId) return false;
+        const facultyDept = assignment.facultyId.department?.trim();
+        const studentDept = student.department?.trim();
+        const matches = facultyDept === studentDept;
+        
+        if (!matches) {
+          console.log('❌ Alt assignment REJECTED:', {
+            facultyName: assignment.facultyId?.name,
+            facultyDepartment: facultyDept,
+            studentDepartment: studentDept
+          });
+        }
+        return matches;
+      });
+      
+      if (matchingAlt.length > 0) {
+        classAssignment = matchingAlt[0];
+        console.log('✅ Found ClassAssignment with original year format:', {
+          studentDepartment: student.department,
+          facultyName: classAssignment.facultyId?.name,
+          facultyDepartment: classAssignment.facultyId?.department
+        });
+      } else {
+        console.log('⚠️ No matching ClassAssignment found with original year format');
       }
     }
     
@@ -1535,8 +1647,16 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     const Holiday = (await import('../models/Holiday.js')).default;
     
     // Convert dateFilter to string format for holiday queries
+    // Prioritize attendanceStartDate/attendanceEndDate if available, otherwise use query params or academic year
     let holidayDateFilter = {};
-    if (startDate && endDate) {
+    if (attendanceStartDate) {
+      // Use attendanceStartDate and attendanceEndDate (or today if no end date)
+      const start = attendanceStartDate.toISOString().split('T')[0];
+      const end = attendanceEndDate 
+        ? attendanceEndDate.toISOString().split('T')[0] 
+        : new Date().toISOString().split('T')[0];
+      holidayDateFilter = { $gte: start, $lte: end };
+    } else if (startDate && endDate) {
       const start = new Date(startDate).toISOString().split('T')[0];
       const end = new Date(endDate).toISOString().split('T')[0];
       holidayDateFilter = { $gte: start, $lte: end };
@@ -1576,7 +1696,6 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       return !holidayDates.has(recordDate) && record.status !== 'Not Marked';
     });
 
-    const totalDays = workingDaysRecords.length;
     // OD students are counted as Present for percentage calculation
     const presentDaysWithOD = workingDaysRecords.filter(record => record.status === 'Present' || record.status === 'OD').length;
     const odDays = workingDaysRecords.filter(record => record.status === 'OD').length;
@@ -1586,7 +1705,67 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       const recordDate = record.date.toISOString().split('T')[0];
       return !holidayDates.has(recordDate) && record.status === 'Not Marked';
     }).length;
+
+    // Calculate total working days from attendanceStartDate to today (or attendanceEndDate)
+    // This matches the logic used in StudentDashboard
+    let totalDays = 0;
+    if (attendanceStartDate) {
+      try {
+        // Convert attendanceStartDate to IST date string
+        const startDateStr = attendanceStartDate instanceof Date 
+          ? toISTDateString(attendanceStartDate) 
+          : (typeof attendanceStartDate === 'string' ? attendanceStartDate : toISTDateString(attendanceStartDate));
+        
+        // Get end date - use attendanceEndDate or today (in IST)
+        let endDateStr;
+        if (attendanceEndDate) {
+          endDateStr = attendanceEndDate instanceof Date 
+            ? toISTDateString(attendanceEndDate) 
+            : (typeof attendanceEndDate === 'string' ? attendanceEndDate : toISTDateString(attendanceEndDate));
+        } else {
+          endDateStr = getCurrentISTDate();
+        }
+        
+        // Don't count future dates - ensure end date is not in the future
+        const todayStr = getCurrentISTDate();
+        if (endDateStr > todayStr) {
+          endDateStr = todayStr;
+        }
+        
+        // Use dayjs with IST timezone for date iteration
+        let currentDate = dayjs.tz(startDateStr, IST_TIMEZONE);
+        const endDate = dayjs.tz(endDateStr, IST_TIMEZONE);
+        
+        if (currentDate.isValid() && endDate.isValid() && (currentDate.isBefore(endDate) || currentDate.isSame(endDate, 'day'))) {
+          let workingDays = 0;
+          
+          while (currentDate.isBefore(endDate) || currentDate.isSame(endDate, 'day')) {
+            const dayOfWeek = currentDate.day(); // 0 = Sunday, 6 = Saturday
+            const dateString = currentDate.format('YYYY-MM-DD');
+            
+            // Count only weekdays (Monday to Friday) and exclude holidays
+            if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayDates.has(dateString)) {
+              workingDays++;
+            }
+            
+            // Move to next day
+            currentDate = currentDate.add(1, 'day');
+          }
+          
+          totalDays = workingDays;
+        }
+      } catch (error) {
+        console.error('Error calculating total working days:', error);
+        // Fallback to workingDaysRecords.length if calculation fails
+        totalDays = workingDaysRecords.length;
+      }
+    } else {
+      // Fallback to workingDaysRecords.length if no attendanceStartDate
+      totalDays = workingDaysRecords.length;
+    }
+
     // Use presentDaysWithOD for percentage calculation (includes OD)
+    // Use the calculated totalDays which includes all working days from start to end
     const attendancePercentage = totalDays > 0 ? Math.round((presentDaysWithOD / totalDays) * 100) : 0;
 
     // Group attendance by month for calendar view (including holidays)
@@ -1645,7 +1824,13 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           section: student.section,
           batch: student.batch,
           classAssigned: student.classAssigned,
-          facultyName: student.facultyId?.name || 'Not assigned',
+          // Use class teacher from ClassAssignment (matched by batch, year, semester, section, and department)
+          // This ensures we get the correct class teacher for the student's actual class
+          // CRITICAL: Verify faculty department matches student department before using
+          facultyName: (classAssignment && classAssignment.facultyId && typeof classAssignment.facultyId === 'object' 
+            && classAssignment.facultyId.department === student.department
+            ? classAssignment.facultyId.name 
+            : (student.facultyId?.name || 'Not assigned')),
           profileImage: student.userId?.profileImage || null
         },
         // Attendance statistics
@@ -1657,9 +1842,14 @@ router.get('/:id/profile', authenticate, async (req, res) => {
           notMarkedDays,
           attendancePercentage,
           holidayCount: holidays.length,
-          attendanceStartDate: attendanceStartDate ? attendanceStartDate.toISOString().split('T')[0] : null,
-          attendanceEndDate: attendanceEndDate ? attendanceEndDate.toISOString().split('T')[0] : null
+          attendanceStartDate: attendanceStartDate ? toISTDateString(attendanceStartDate) : null,
+          attendanceEndDate: attendanceEndDate ? toISTDateString(attendanceEndDate) : null
         },
+        // Include holidays array in response
+        holidays: holidays.map(holiday => ({
+          date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
+          reason: holiday.reason || 'Holiday'
+        })),
         // Monthly attendance data for calendar
         monthlyAttendance,
         // Recent attendance for quick view

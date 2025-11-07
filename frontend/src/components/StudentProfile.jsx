@@ -17,18 +17,38 @@ const StudentProfile = () => {
   const [attendanceStartDate, setAttendanceStartDate] = useState(null);
   const [attendanceEndDate, setAttendanceEndDate] = useState(null);
   const [holidays, setHolidays] = useState([]);
-  const [calculatedWorkingDays, setCalculatedWorkingDays] = useState(0);
+  const [calculatedWorkingDays, setCalculatedWorkingDays] = useState(null);
 
   // Calculate working days from attendance start date to today
+  // Exact same logic as StudentDashboard
   const calculateWorkingDays = (startDate, endDate = null, holidaysList = []) => {
     if (!startDate) return 0;
 
     try {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      // Parse start date - handle string format YYYY-MM-DD to avoid timezone issues
+      let start;
+      if (typeof startDate === 'string') {
+        const [year, month, day] = startDate.split('T')[0].split('-').map(Number);
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      } else {
+        start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+      }
       
-      const end = endDate ? new Date(endDate) : new Date();
-      end.setHours(23, 59, 59, 999);
+      // Parse end date
+      let end;
+      if (endDate) {
+        if (typeof endDate === 'string') {
+          const [year, month, day] = endDate.split('T')[0].split('-').map(Number);
+          end = new Date(year, month - 1, day, 23, 59, 59, 999);
+        } else {
+          end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+        }
+      } else {
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
+      }
       
       // Don't count future dates
       const today = new Date();
@@ -38,28 +58,88 @@ const StudentProfile = () => {
       if (start > actualEnd) return 0;
 
       // Create a set of holiday dates for quick lookup
+      // Handle both string and Date formats, ensuring consistent YYYY-MM-DD format
       const holidayDates = new Set(
         holidaysList.map(holiday => {
-          const holidayDate = new Date(holiday.date);
-          return holidayDate.toISOString().split('T')[0];
-        })
+          const holidayDateValue = holiday.date || holiday.holidayDate || holiday;
+          
+          // If it's already a string in YYYY-MM-DD format, use it directly
+          if (typeof holidayDateValue === 'string') {
+            // Extract just the date part (YYYY-MM-DD) if it includes time
+            return holidayDateValue.split('T')[0];
+          }
+          
+          // If it's a Date object, format it properly to avoid timezone issues
+          if (holidayDateValue instanceof Date) {
+            // Use local date components to avoid timezone conversion
+            const year = holidayDateValue.getFullYear();
+            const month = String(holidayDateValue.getMonth() + 1).padStart(2, '0');
+            const day = String(holidayDateValue.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+          
+          // Fallback: try to convert to string and extract date
+          return String(holidayDateValue).split('T')[0];
+        }).filter(date => date && date.length === 10) // Only valid YYYY-MM-DD dates
       );
 
+      console.log('📅 [WorkingDays Calc] Holiday dates set:', Array.from(holidayDates));
+      console.log('📅 [WorkingDays Calc] Holidays list:', holidaysList);
+      console.log('📅 [WorkingDays Calc] Start date:', startDate, 'End date:', endDate);
+
       let workingDays = 0;
+      let skippedSundays = 0;
+      let skippedSaturdays = 0;
+      let skippedHolidays = 0;
       const currentDate = new Date(start);
       
       while (currentDate <= actualEnd) {
         const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
-        const dateString = currentDate.toISOString().split('T')[0];
         
-        // Count only weekdays (Monday to Friday) and exclude holidays
-        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayDates.has(dateString)) {
-          workingDays++;
+        // Format date as YYYY-MM-DD using local date components to avoid timezone issues
+        const year = currentDate.getFullYear();
+        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        const dateString = `${year}-${month}-${day}`;
+        
+        // Skip Sundays (0)
+        if (dayOfWeek === 0) {
+          skippedSundays++;
+          console.log('⏭️ [WorkingDays Calc] Skipping Sunday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
         }
+        
+        // Skip Saturdays (6)
+        if (dayOfWeek === 6) {
+          skippedSaturdays++;
+          console.log('⏭️ [WorkingDays Calc] Skipping Saturday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+        
+        // Skip holidays - check if this date is in the holiday set
+        if (holidayDates.has(dateString)) {
+          skippedHolidays++;
+          console.log('🎉 [WorkingDays Calc] Skipping holiday:', dateString);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+        
+        // Count only weekdays (Monday to Friday) that are not holidays
+        workingDays++;
         
         // Move to next day
         currentDate.setDate(currentDate.getDate() + 1);
       }
+      
+      console.log('📊 [WorkingDays Calc] Summary:', {
+        workingDays,
+        skippedSundays,
+        skippedSaturdays,
+        skippedHolidays,
+        totalDaysChecked: workingDays + skippedSundays + skippedSaturdays + skippedHolidays
+      });
       
       return workingDays;
     } catch (error) {
@@ -83,30 +163,58 @@ const StudentProfile = () => {
   // This ensures we get the exact same holidays as StudentDashboard
   useEffect(() => {
     const fetchAttendanceData = async () => {
-      if (studentId && attendanceStartDate) {
+      // Use userId from studentData if available, otherwise try studentId
+      // studentData.userId is the User document ID
+      const userIdToUse = studentData?.userId || studentId;
+      
+      console.log('🔍 [StudentProfile] Fetching holidays for userId:', userIdToUse, 'startDate:', attendanceStartDate);
+      
+      if (userIdToUse && attendanceStartDate) {
         try {
           // Fetch from attendance API to get holidays (same as StudentDashboard)
-          const res = await fetch(`/api/attendance/student/${studentId}`, {
+          // Use userId (not studentId) - attendance API expects User ID
+          const res = await fetch(`/api/attendance/student/${userIdToUse}`, {
             headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
           });
           
           const data = await res.json();
           
+          console.log('📡 [StudentProfile] Attendance API response status:', res.status);
+          console.log('📡 [StudentProfile] Attendance API response keys:', data ? Object.keys(data) : 'no data');
+          
           // Use holidays from API response if available (same as StudentDashboard)
           if (res.ok && data && data.holidays && Array.isArray(data.holidays)) {
-            setHolidays(data.holidays);
-            console.log('🎉 [StudentProfile] Holidays from attendance API:', data.holidays);
+            // Ensure holidays are in the correct format with date field
+            const formattedHolidays = data.holidays.map(holiday => ({
+              date: holiday.date || holiday.holidayDate || holiday,
+              reason: holiday.reason || 'Holiday'
+            }));
+            setHolidays(formattedHolidays);
+            console.log('🎉 [StudentProfile] Holidays from attendance API:', formattedHolidays);
+            console.log('🎉 [StudentProfile] Holidays count:', formattedHolidays.length);
+            console.log('🎉 [StudentProfile] Holiday dates:', formattedHolidays.map(h => h.date));
           } else {
             console.log('⚠️ [StudentProfile] No holidays in attendance API response');
+            console.log('⚠️ [StudentProfile] Full response:', data);
+            // Try to fetch holidays from profile API response if available
+            if (data?.status === 'error') {
+              console.error('❌ [StudentProfile] API error:', data.message);
+            }
           }
         } catch (e) {
           console.error('❌ [StudentProfile] Error fetching holidays from attendance API:', e);
         }
+      } else {
+        console.log('⚠️ [StudentProfile] Cannot fetch holidays - missing userId or startDate', {
+          userIdToUse,
+          attendanceStartDate,
+          hasStudentData: !!studentData
+        });
       }
     };
     
     fetchAttendanceData();
-  }, [studentId, attendanceStartDate]);
+  }, [studentId, studentData?.userId, attendanceStartDate]);
   
   // Fetch holidays as fallback (if not included in attendance API response)
   // Same fallback logic as StudentDashboard
@@ -137,9 +245,9 @@ const StudentProfile = () => {
   }, [studentId, holidays.length]);
 
   // Calculate total working days from attendance start date to today
-  // Exact same logic as StudentDashboard
   useEffect(() => {
     if (attendanceStartDate) {
+      // Always recalculate when dates or holidays change
       const workingDays = calculateWorkingDays(attendanceStartDate, attendanceEndDate, holidays);
       setCalculatedWorkingDays(workingDays);
       console.log('📊 [StudentProfile] Calculated working days:', {
@@ -150,12 +258,10 @@ const StudentProfile = () => {
         workingDays
       });
     } else {
-      // If no start date, use the count from attendanceStats as fallback
-      const fallbackDays = attendanceStats?.totalDays || 0;
-      setCalculatedWorkingDays(fallbackDays);
-      console.log('⚠️ [StudentProfile] No start date, using backend totalDays:', fallbackDays);
+      // If no start date, reset to null so it shows backend value
+      setCalculatedWorkingDays(null);
     }
-  }, [attendanceStartDate, attendanceEndDate, holidays, attendanceStats?.totalDays]);
+  }, [attendanceStartDate, attendanceEndDate, holidays]);
 
   const fetchStudentProfile = async () => {
     try {
@@ -172,23 +278,59 @@ const StudentProfile = () => {
         setMonthlyAttendance(responseData.data.monthlyAttendance);
         setRecentAttendance(responseData.data.recentAttendance);
         
+        console.log('👤 [StudentProfile] Student data:', responseData.data.student);
+        console.log('👤 [StudentProfile] Student userId:', responseData.data.student?.userId);
+        
         // Clear holidays initially - will be fetched from attendance API
         setHolidays([]);
+        // Reset calculated working days to force recalculation
+        setCalculatedWorkingDays(null);
         
-        // Extract attendance dates from attendanceStats
+        // Extract attendance dates from attendanceStats - ensure they're strings in YYYY-MM-DD format
         console.log('📅 Attendance stats from API:', responseData.data.attendanceStats);
         if (responseData.data.attendanceStats?.attendanceStartDate) {
-          console.log('✅ Setting attendance start date:', responseData.data.attendanceStats.attendanceStartDate);
-          setAttendanceStartDate(responseData.data.attendanceStats.attendanceStartDate);
+          // Ensure date is a string in YYYY-MM-DD format (avoid timezone conversion)
+          let startDateStr = responseData.data.attendanceStats.attendanceStartDate;
+          if (startDateStr instanceof Date) {
+            // If it's a Date object, convert to YYYY-MM-DD string without timezone conversion
+            const year = startDateStr.getFullYear();
+            const month = String(startDateStr.getMonth() + 1).padStart(2, '0');
+            const day = String(startDateStr.getDate()).padStart(2, '0');
+            startDateStr = `${year}-${month}-${day}`;
+          } else if (typeof startDateStr === 'string') {
+            // If it's already a string, ensure it's in YYYY-MM-DD format
+            startDateStr = startDateStr.split('T')[0];
+          }
+          console.log('✅ Setting attendance start date:', startDateStr);
+          setAttendanceStartDate(startDateStr);
         } else {
           console.log('⚠️ No attendance start date in response');
           setAttendanceStartDate(null);
         }
         if (responseData.data.attendanceStats?.attendanceEndDate) {
-          console.log('✅ Setting attendance end date:', responseData.data.attendanceStats.attendanceEndDate);
-          setAttendanceEndDate(responseData.data.attendanceStats.attendanceEndDate);
+          // Ensure date is a string in YYYY-MM-DD format (avoid timezone conversion)
+          let endDateStr = responseData.data.attendanceStats.attendanceEndDate;
+          if (endDateStr instanceof Date) {
+            // If it's a Date object, convert to YYYY-MM-DD string without timezone conversion
+            const year = endDateStr.getFullYear();
+            const month = String(endDateStr.getMonth() + 1).padStart(2, '0');
+            const day = String(endDateStr.getDate()).padStart(2, '0');
+            endDateStr = `${year}-${month}-${day}`;
+          } else if (typeof endDateStr === 'string') {
+            // If it's already a string, ensure it's in YYYY-MM-DD format
+            endDateStr = endDateStr.split('T')[0];
+          }
+          console.log('✅ Setting attendance end date:', endDateStr);
+          setAttendanceEndDate(endDateStr);
         } else {
           setAttendanceEndDate(null);
+        }
+        
+        // Also fetch holidays from the profile API if available, or fetch from attendance API
+        // Check if holidays are in the response first
+        if (responseData.data.holidays && Array.isArray(responseData.data.holidays)) {
+          setHolidays(responseData.data.holidays);
+          console.log('🎉 [StudentProfile] Holidays from profile API:', responseData.data.holidays);
         }
       } else {
         throw new Error(responseData.message || 'Failed to fetch student profile');
@@ -476,6 +618,18 @@ const StudentProfile = () => {
                       <span className="font-medium text-amber-800">Holidays</span>
                     </div>
                     <span className="text-2xl font-bold text-amber-600">{attendanceStats.holidayCount || 0}</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-3 bg-indigo-50 rounded-lg">
+                    <div className="flex items-center">
+                      <span className="text-2xl mr-3">📅</span>
+                      <span className="font-medium text-indigo-800">Total Working Days</span>
+                    </div>
+                    <span className="text-2xl font-bold text-indigo-600">
+                      {attendanceStartDate && calculatedWorkingDays !== null 
+                        ? calculatedWorkingDays 
+                        : (attendanceStats?.totalDays || 0)}
+                    </span>
                   </div>
                   
                   <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg">

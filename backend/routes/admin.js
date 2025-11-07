@@ -1111,6 +1111,7 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
     });
 
     // Fetch all active class assignments for these classes
+    // CRITICAL: Must filter by faculty department to prevent cross-department matches
     const classAssignmentsArray = Array.from(classKeys).map(key => {
       const [batch, year, semester, section] = key.split('_');
       return { batch, year, semester: parseInt(semester), section };
@@ -1120,15 +1121,10 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
       $or: classAssignmentsArray,
       active: true
     })
-      .populate('facultyId', 'name email position')
+      .populate('facultyId', 'name email position department') // Include department field
       .lean();
 
-    // Create a map: classKey -> classAssignment
-    const assignmentMap = new Map();
-    classAssignments.forEach(assignment => {
-      const classKey = `${assignment.batch}_${assignment.year}_${assignment.semester}_${assignment.section}`;
-      assignmentMap.set(classKey, assignment);
-    });
+    console.log(`📋 [students-by-department] Found ${classAssignments.length} total ClassAssignments`);
 
     // Get all unique faculty user IDs to fetch their Faculty records
     const facultyUserIds = [...new Set(classAssignments
@@ -1150,6 +1146,23 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
         facultyMap.set(userId, faculty);
       }
     });
+
+    // Create a map: classKey -> classAssignment, but ONLY for assignments where faculty department matches student department
+    // Since we're grouping by department, we need to filter assignments per student's department
+    const assignmentMap = new Map();
+    
+    // We'll create the map on-demand when processing each student, ensuring department match
+    // For now, store all assignments grouped by classKey, we'll filter by department when accessing
+    const assignmentsByClassKey = new Map();
+    classAssignments.forEach(assignment => {
+      const classKey = `${assignment.batch}_${assignment.year}_${assignment.semester}_${assignment.section}`;
+      if (!assignmentsByClassKey.has(classKey)) {
+        assignmentsByClassKey.set(classKey, []);
+      }
+      assignmentsByClassKey.get(classKey).push(assignment);
+    });
+    
+    console.log(`📊 [students-by-department] Created assignments map with ${assignmentsByClassKey.size} unique class keys`);
 
     // Fetch today's attendance records for all students
     const Attendance = (await import('../models/Attendance.js')).default;
@@ -1197,25 +1210,78 @@ router.get('/students-by-department', principalAndAbove, async (req, res) => {
 
         if (!isNaN(semesterNumber)) {
           const classKey = `${student.batch}_${student.year}_${semesterNumber}_${student.section}`;
-          const classAssignment = assignmentMap.get(classKey);
-
-          if (classAssignment && classAssignment.facultyId) {
-            const facultyUserId = classAssignment.facultyId._id?.toString();
+          
+          // Get all assignments for this class key
+          const assignmentsForClass = assignmentsByClassKey.get(classKey) || [];
+          
+          // CRITICAL: Filter to find assignment where faculty department matches student department
+          const studentDept = student.department?.trim();
+          let matchingAssignment = null;
+          
+          for (const assignment of assignmentsForClass) {
+            if (!assignment.facultyId) continue;
+            
+            // Check department from populated facultyId (User model)
+            const facultyDept = assignment.facultyId.department?.trim();
+            
+            // Also check from Faculty model if available
+            const facultyUserId = assignment.facultyId._id?.toString();
+            const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
+            const facultyDeptFromRecord = advisorFaculty?.department?.trim();
+            
+            // Use the most reliable department source
+            const actualFacultyDept = facultyDept || facultyDeptFromRecord;
+            
+            if (actualFacultyDept === studentDept) {
+              matchingAssignment = assignment;
+              console.log('✅ [students-by-department] Found matching assignment:', {
+                studentDepartment: studentDept,
+                facultyDepartment: actualFacultyDept,
+                facultyName: assignment.facultyId?.name,
+                classKey
+              });
+              break; // Use first match
+            } else {
+              console.log('❌ [students-by-department] Assignment rejected - department mismatch:', {
+                studentDepartment: studentDept,
+                facultyDepartment: actualFacultyDept,
+                facultyName: assignment.facultyId?.name,
+                classKey
+              });
+            }
+          }
+          
+          // If no match found, log warning
+          if (assignmentsForClass.length > 0 && !matchingAssignment) {
+            console.log('⚠️ [students-by-department] No matching assignment found for student:', {
+              studentDepartment: studentDept,
+              studentName: student.name,
+              classKey,
+              availableAssignments: assignmentsForClass.map(a => ({
+                facultyName: a.facultyId?.name,
+                facultyDepartment: a.facultyId?.department
+              }))
+            });
+          }
+          
+          // Use the matching assignment to set class teacher
+          if (matchingAssignment && matchingAssignment.facultyId) {
+            const facultyUserId = matchingAssignment.facultyId._id?.toString();
             const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
 
-            if (advisorFaculty) {
+            if (advisorFaculty && advisorFaculty.department?.trim() === studentDept) {
               classTeacher = {
                 id: advisorFaculty._id,
                 name: advisorFaculty.name,
                 position: advisorFaculty.position || 'Faculty',
-                email: advisorFaculty.email || classAssignment.facultyId.email
+                email: advisorFaculty.email || matchingAssignment.facultyId.email
               };
-            } else if (classAssignment.facultyId) {
-              // Fallback to User info if Faculty record not found
+            } else if (matchingAssignment.facultyId && matchingAssignment.facultyId.department?.trim() === studentDept) {
+              // Fallback to User info if Faculty record not found, but verify department matches
               classTeacher = {
-                name: classAssignment.facultyId.name || 'Unknown',
-                position: classAssignment.facultyId.position || 'Faculty',
-                email: classAssignment.facultyId.email
+                name: matchingAssignment.facultyId.name || 'Unknown',
+                position: matchingAssignment.facultyId.position || 'Faculty',
+                email: matchingAssignment.facultyId.email
               };
             }
           }
@@ -1551,26 +1617,85 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
     });
 
     // Fetch all active class assignments for these classes
-    const classAssignmentsArray = Array.from(classKeys).map(key => {
-      const [batch, year, semester, section] = key.split('_');
-      return { batch, year, semester: parseInt(semester), section };
+    // CRITICAL: Filter by department to prevent cross-department matches
+    // Since multiple departments can have same batch/year/semester/section, we must filter by departmentId
+    const User = (await import('../models/User.js')).default;
+    
+    // Find all HOD Users for the HOD's department
+    const hodUsers = await User.find({
+      role: 'hod',
+      department: department,
+      status: 'active'
+    }).select('_id department').lean();
+    
+    const hodIds = hodUsers.map(hod => hod._id);
+    
+    console.log('🔍 [department-students] Finding ClassAssignments for department:', {
+      department,
+      hodIds: hodIds.length,
+      classKeysCount: classKeys.size
+    });
+    
+    // Build query for class assignments - match by class details AND departmentId
+    const classAssignmentsQuery = {
+      $and: [
+        {
+          $or: Array.from(classKeys).map(key => {
+            const [batch, year, semester, section] = key.split('_');
+            return { 
+              batch, 
+              year, 
+              semester: parseInt(semester), 
+              section 
+            };
+          })
+        },
+        {
+          departmentId: { $in: hodIds } // Only get assignments from HODs in this department
+        },
+        {
+          active: true
+        }
+      ]
+    };
+    
+    const classAssignments = await ClassAssignment.find(classAssignmentsQuery)
+      .populate('facultyId', 'name email position department')
+      .populate('departmentId', 'name department')
+      .lean();
+    
+    console.log('✅ [department-students] Found ClassAssignments:', {
+      count: classAssignments.length,
+      assignments: classAssignments.map(ca => ({
+        id: ca._id,
+        classKey: `${ca.batch}_${ca.year}_${ca.semester}_${ca.section}`,
+        facultyName: ca.facultyId?.name,
+        facultyDepartment: ca.facultyId?.department
+      }))
     });
 
-    // Filter class assignments by department to prevent cross-department matches
-    // Only get assignments for the HOD's department (using departmentId)
-    const classAssignments = await ClassAssignment.find({
-      $or: classAssignmentsArray,
-      departmentId: currentUser._id, // Only get assignments for HOD's department
-      active: true
-    })
-      .populate('facultyId', 'name email position department')
-      .lean();
-
     // Create a map: classKey -> classAssignment
+    // Since we've already filtered by department, all assignments here are from the correct department
     const assignmentMap = new Map();
     classAssignments.forEach(assignment => {
       const classKey = `${assignment.batch}_${assignment.year}_${assignment.semester}_${assignment.section}`;
-      assignmentMap.set(classKey, assignment);
+      // Only add if not already present (use most recent if multiple exist for same class)
+      if (!assignmentMap.has(classKey)) {
+        assignmentMap.set(classKey, assignment);
+      } else {
+        // If multiple assignments exist for same class, use the most recent one
+        const existing = assignmentMap.get(classKey);
+        const existingDate = existing.updatedAt || existing.createdAt || new Date(0);
+        const newDate = assignment.updatedAt || assignment.createdAt || new Date(0);
+        if (newDate > existingDate) {
+          assignmentMap.set(classKey, assignment);
+        }
+      }
+    });
+    
+    console.log('📊 [department-students] Assignment map created:', {
+      mapSize: assignmentMap.size,
+      classKeys: Array.from(assignmentMap.keys())
     });
 
     // Get all unique faculty user IDs to fetch their Faculty records
@@ -1639,21 +1764,34 @@ router.get('/department-students', hodAndAbove, async (req, res) => {
             const facultyUserId = classAssignment.facultyId._id?.toString();
             const advisorFaculty = facultyUserId ? facultyMap.get(facultyUserId) : null;
 
-            // Only use faculty if they belong to the same department
-            if (advisorFaculty && advisorFaculty.department === department) {
-              classTeacher = {
-                id: advisorFaculty._id,
-                name: advisorFaculty.name,
-                position: advisorFaculty.position || 'Faculty',
-                email: advisorFaculty.email || classAssignment.facultyId.email
-              };
-            } else if (classAssignment.facultyId && classAssignment.facultyId.department === department) {
-              // Fallback to User info if Faculty record not found, but verify department matches
-              classTeacher = {
-                name: classAssignment.facultyId.name || 'Unknown',
-                position: classAssignment.facultyId.position || 'Faculty',
-                email: classAssignment.facultyId.email
-              };
+            // Since we've already filtered ClassAssignments by department, 
+            // all assignments in the map should be from the correct department
+            // But double-check to be safe
+            const facultyDepartment = advisorFaculty?.department || classAssignment.facultyId?.department;
+            
+            if (facultyDepartment === department) {
+              if (advisorFaculty) {
+                classTeacher = {
+                  id: advisorFaculty._id,
+                  name: advisorFaculty.name,
+                  position: advisorFaculty.position || 'Faculty',
+                  email: advisorFaculty.email || classAssignment.facultyId.email
+                };
+              } else if (classAssignment.facultyId) {
+                // Fallback to User info if Faculty record not found
+                classTeacher = {
+                  name: classAssignment.facultyId.name || 'Unknown',
+                  position: classAssignment.facultyId.position || 'Faculty',
+                  email: classAssignment.facultyId.email
+                };
+              }
+            } else {
+              console.warn('⚠️ [department-students] Faculty department mismatch:', {
+                classKey,
+                studentDepartment: department,
+                facultyDepartment,
+                facultyName: classAssignment.facultyId?.name
+              });
             }
             // If faculty doesn't belong to department, classTeacher remains null
           }

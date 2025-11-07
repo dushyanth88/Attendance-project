@@ -192,12 +192,18 @@ router.get('/', async (req, res) => {
       dateFilter = { $gte: yearStart, $lte: yearEnd };
     }
 
+    // Principal and admin can see all holidays across all departments
+    // Others can only see holidays for their department
+    const departmentFilter = (currentUser.role === 'principal' || currentUser.role === 'admin') 
+      ? {} 
+      : { department: currentUser.department };
+
     const holidays = await Holiday.find({
-      department: currentUser.department,
+      ...departmentFilter,
       isDeleted: false,
       holidayDate: dateFilter
     })
-      .populate('createdBy', 'name')
+      .populate('createdBy', 'name email')
       .populate('updatedBy', 'name')
       .sort({ holidayDate: 1 });
 
@@ -220,7 +226,9 @@ router.get('/', async (req, res) => {
         id: holiday._id,
         date: typeof holiday.holidayDate === 'string' ? holiday.holidayDate : holiday.holidayDate.toISOString().split('T')[0],
         reason: holiday.reason,
-        createdBy: holiday.createdBy.name,
+        department: holiday.department,
+        createdBy: holiday.createdBy?.name || 'Unknown',
+        createdByEmail: holiday.createdBy?.email || null,
         updatedBy: holiday.updatedBy?.name || null,
         createdAt: holiday.createdAt,
         updatedAt: holiday.updatedAt
