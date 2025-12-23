@@ -469,16 +469,16 @@ const StudentDashboard = () => {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       {/* Sticky Header */}
       <header className="sticky top-0 z-50 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-lg">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div className="flex items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-4 sm:py-6 gap-4">
+            <div className="flex items-center w-full sm:w-auto">
               {/* Profile Picture */}
-              <div className="relative mr-4 cursor-pointer" onClick={() => setShowImagePreview(true)}>
+              <div className="relative mr-3 sm:mr-4 cursor-pointer flex-shrink-0" onClick={() => setShowImagePreview(true)}>
                 {profileImage ? (
                   <img
                     src={profileImage}
                     alt={`${user.name}'s profile`}
-                    className="w-12 h-12 rounded-full object-cover border-2 border-white border-opacity-30"
+                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-white border-opacity-30"
                     onError={(e) => {
                       e.target.style.display = 'none';
                       e.target.nextSibling.style.display = 'flex';
@@ -486,16 +486,16 @@ const StudentDashboard = () => {
                   />
                 ) : null}
                 <div 
-                  className={`w-12 h-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white font-semibold text-lg border-2 border-white border-opacity-30 ${profileImage ? 'hidden' : 'flex'}`}
+                  className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white font-semibold text-base sm:text-lg border-2 border-white border-opacity-30 ${profileImage ? 'hidden' : 'flex'}`}
                 >
                   {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
                 </div>
               </div>
               
-              <div>
-                <h1 className="text-2xl font-bold text-white">Student Dashboard</h1>
-                <p className="text-white text-opacity-90">Welcome back, {user?.name}</p>
-                <p className="text-sm text-white text-opacity-80 bg-white bg-opacity-20 inline-block px-3 py-1 rounded-full mt-1">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold text-white truncate">Student Dashboard</h1>
+                <p className="text-white text-opacity-90 text-sm sm:text-base truncate">Welcome back, {user?.name}</p>
+                <p className="text-xs sm:text-sm text-white text-opacity-80 bg-white bg-opacity-20 inline-block px-2 sm:px-3 py-0.5 sm:py-1 rounded-full mt-1">
                   📍 Department: {user?.department}
                 </p>
               </div>
@@ -503,7 +503,7 @@ const StudentDashboard = () => {
             
             <button
               onClick={logout}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-xl transition-all duration-200 shadow-lg font-semibold backdrop-blur-sm"
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg sm:rounded-xl transition-all duration-200 shadow-lg font-medium sm:font-semibold backdrop-blur-sm text-sm sm:text-base w-full sm:w-auto min-h-[44px] touch-manipulation"
             >
               Logout
             </button>
@@ -512,16 +512,16 @@ const StudentDashboard = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Profile Section */}
-        <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 mb-8">
-          <div className="flex items-center">
-            <div className="relative mr-6 cursor-pointer" onClick={() => setShowImagePreview(true)}>
+        <div className="bg-gradient-to-br from-white to-blue-50 rounded-xl sm:rounded-2xl shadow-lg border border-blue-100 p-4 sm:p-6 mb-4 sm:mb-6 lg:mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="relative cursor-pointer flex-shrink-0" onClick={() => setShowImagePreview(true)}>
               {user?.profileImage ? (
                 <img
                   src={user.profileImage}
                   alt={`${user.name}'s profile`}
-                  className="w-20 h-20 rounded-full object-cover border-4 border-blue-200"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-4 border-blue-200"
                   onError={(e) => {
                     e.target.style.display = 'none';
                     e.target.nextSibling.style.display = 'flex';
@@ -529,94 +529,94 @@ const StudentDashboard = () => {
                 />
               ) : null}
               <div 
-                className={`w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-2xl border-4 border-blue-200 shadow-lg ${user?.profileImage ? 'hidden' : 'flex'}`}
+                className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-xl sm:text-2xl border-4 border-blue-200 shadow-lg ${user?.profileImage ? 'hidden' : 'flex'}`}
               >
                 {user?.name ? user.name.charAt(0).toUpperCase() : 'S'}
               </div>
             </div>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-800">{user?.name}</h2>
-              <p className="text-gray-600">{user?.email}</p>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">{user?.name}</h2>
+              <p className="text-gray-600 text-sm sm:text-base truncate">{user?.email}</p>
               {rollNumber && (
-                <p className="text-sm text-purple-600 font-medium">Roll Number: {rollNumber}</p>
+                <p className="text-xs sm:text-sm text-purple-600 font-medium">Roll Number: {rollNumber}</p>
               )}
-              <p className="text-sm text-blue-600">Department: {user?.department}</p>
-              <p className="text-sm text-gray-500">Class: {user?.class || 'Not assigned'}</p>
+              <p className="text-xs sm:text-sm text-blue-600">Department: {user?.department}</p>
+              <p className="text-xs sm:text-sm text-gray-500">Class: {user?.class || 'Not assigned'}</p>
             </div>
           </div>
         </div>
 
         {/* Attendance Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-gradient-to-br from-white to-green-50 rounded-2xl shadow-lg border border-green-100 p-6 hover:shadow-xl transition-all duration-300">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-4 sm:mb-6 lg:mb-8">
+          <div className="bg-gradient-to-br from-white to-green-50 rounded-xl sm:rounded-2xl shadow-lg border border-green-100 p-3 sm:p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-3 rounded-xl mr-3 shadow-lg">
-                <span className="text-2xl">📊</span>
+              <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-2 sm:p-3 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg">
+                <span className="text-lg sm:text-xl lg:text-2xl">📊</span>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Overall Attendance</p>
-                <p className="text-2xl font-bold text-green-600">{overall}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium truncate">Overall Attendance</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-green-600">{overall}</p>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 hover:shadow-xl transition-all duration-300">
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-xl sm:rounded-2xl shadow-lg border border-blue-100 p-3 sm:p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
-                <span className="text-2xl">✅</span>
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-2 sm:p-3 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg">
+                <span className="text-lg sm:text-xl lg:text-2xl">✅</span>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Present Days</p>
-                <p className="text-2xl font-bold text-gray-800">{presentDays}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium truncate">Present Days</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{presentDays}</p>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg border border-blue-100 p-6 hover:shadow-xl transition-all duration-300">
+          <div className="bg-gradient-to-br from-white to-blue-50 rounded-xl sm:rounded-2xl shadow-lg border border-blue-100 p-3 sm:p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-3 rounded-xl mr-3 shadow-lg">
-                <span className="text-2xl">📋</span>
+              <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-2 sm:p-3 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg">
+                <span className="text-lg sm:text-xl lg:text-2xl">📋</span>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 font-medium">OD Days</p>
-                <p className="text-2xl font-bold text-gray-800">{odDays}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium truncate">OD Days</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{odDays}</p>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-red-50 rounded-2xl shadow-lg border border-red-100 p-6 hover:shadow-xl transition-all duration-300">
+          <div className="bg-gradient-to-br from-white to-red-50 rounded-xl sm:rounded-2xl shadow-lg border border-red-100 p-3 sm:p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <div className="bg-gradient-to-br from-red-500 to-pink-600 p-3 rounded-xl mr-3 shadow-lg">
-                <span className="text-2xl">❌</span>
+              <div className="bg-gradient-to-br from-red-500 to-pink-600 p-2 sm:p-3 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg">
+                <span className="text-lg sm:text-xl lg:text-2xl">❌</span>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Absent Days</p>
-                <p className="text-2xl font-bold text-gray-800">{absentDays}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium truncate">Absent Days</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{absentDays}</p>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-purple-50 rounded-2xl shadow-lg border border-purple-100 p-6 hover:shadow-xl transition-all duration-300">
+          <div className="bg-gradient-to-br from-white to-purple-50 rounded-xl sm:rounded-2xl shadow-lg border border-purple-100 p-3 sm:p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
             <div className="flex items-center">
-              <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-3 rounded-xl mr-3 shadow-lg">
-                <span className="text-2xl">📚</span>
+              <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-2 sm:p-3 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg">
+                <span className="text-lg sm:text-xl lg:text-2xl">📚</span>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Total Working Days</p>
-                <p className="text-2xl font-bold text-gray-800">{totalWorkingDays}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium truncate">Total Working Days</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{totalWorkingDays}</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* Attendance Period Card - Always visible */}
-        <div className={`rounded-lg shadow-lg p-6 mb-8 border-2 ${
+        <div className={`rounded-xl sm:rounded-lg shadow-lg p-4 sm:p-6 mb-4 sm:mb-6 lg:mb-8 border-2 ${
           attendanceStartDate 
             ? 'bg-gradient-to-r from-green-50 to-blue-50 border-green-300' 
             : 'bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-300'
         }`}>
-          <div className="flex items-center">
-            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-4 rounded-xl mr-4 shadow-lg">
-              <span className="text-4xl">📅</span>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 sm:p-4 rounded-lg sm:rounded-xl shadow-lg flex-shrink-0">
+              <span className="text-2xl sm:text-3xl lg:text-4xl">📅</span>
             </div>
-            <div className="flex-1">
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Attendance Period</h3>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">Attendance Period</h3>
               {attendanceStartDate ? (
                 <>
                   <div className="space-y-2">

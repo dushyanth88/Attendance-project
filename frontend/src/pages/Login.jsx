@@ -96,7 +96,7 @@ const Login = () => {
         </div>
       </div>
 
-      <div className="w-full max-w-md mx-auto flex flex-col items-center pt-16">
+      <div className="w-full max-w-md mx-auto flex flex-col items-center pt-20 sm:pt-24 px-3 sm:px-4">
         {/* Logo and Title */}
         <div className="flex flex-col items-center justify-center mb-5 sm:mb-6 w-full animate-fadeInUp">
           <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-white rounded-full mb-3 sm:mb-4 shadow-xl animate-float hover:scale-110 transition-transform duration-300">
